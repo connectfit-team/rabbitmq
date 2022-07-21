@@ -1,16 +1,16 @@
 ![RabbitMQ Client](https://upload.wikimedia.org/wikipedia/commons/thumb/7/71/RabbitMQ_logo.svg/2560px-RabbitMQ_logo.svg.png)
 
-RabbitMQ Client provide a simple yet robust abstraction around [the most widely used Go AMQP 0.9.1 client](https://github.com/rabbitmq/amqp091-go). This package has been designed to ease the interactions with the RabbitMQ server and let the developer focus on what really matter.
+</br>
 
-</br >
+### RabbitMQ Client provide a simple yet robust abstraction around [the most widely used Go AMQP 0.9.1 client](https://github.com/rabbitmq/amqp091-go). This package has been designed to ease the interactions with the RabbitMQ server and let the developer focus on what really matter.
 
 # ⚙️ Installation
+</br>
 
 `go get bitbucket.org/connectfit/rabbitmq`
 
-</br >
-
 # ⚡️ Quickstart
+</br>
 
 ```Go
 package main
@@ -43,16 +43,14 @@ func main() {
 }
 ```
 
-</br>
-
 # 📖 Features
+</br>
 
 * Automatic connection recovery(including channel and consumers recovery)
 * Context handling(gracefully shutdown on context cancellation)
 
-</br>
-
 # 📚 Options
+</br>
 
 The client originally use a default configuration to connect to a RabbitMQ instance locally but it is actually highly configurable through functional options:
 

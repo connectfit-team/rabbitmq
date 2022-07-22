@@ -50,10 +50,10 @@ type Client struct {
 // NewClient creates a new client instance.
 func NewClient(logger *log.Logger, opts ...ClientOption) *Client {
 	cfg := ClientConfig{
-			ConnectionConfig: DefaultConnectionConfig,
-			ChannelConfig:    DefaultChannelConfig,
-			QueueConfig:      DefaultQueueConfig,
-			ConsumerConfig:   DefaultConsumerConfig,
+		ConnectionConfig: DefaultConnectionConfig,
+		ChannelConfig:    DefaultChannelConfig,
+		QueueConfig:      DefaultQueueConfig,
+		ConsumerConfig:   DefaultConsumerConfig,
 		PublishConfig:    DefaultPublishConfig,
 	}
 
@@ -316,6 +316,44 @@ func (c *Client) Consume(ctx context.Context) (<-chan amqp.Delivery, error) {
 		}
 	}()
 	return out, nil
+}
+
+// Publish tries to publish a message in the channel until it receives a confirmation
+// from the server that the message as been successfully published or until it reaches
+// the configured timeout.
+//
+// The client must be connected to use this method.
+func (c *Client) Publish(ctx context.Context, msg amqp.Publishing) error {
+	if !c.isReady() {
+		return ErrNotConnected
+	}
+
+	timeout := time.After(c.config.PublishConfig.Timeout)
+	for {
+		err := c.channel.Publish(
+			c.config.PublishConfig.Exchange,
+			c.queue.Name,
+			c.config.PublishConfig.Mandatory,
+			c.config.PublishConfig.Immediate,
+			msg,
+		)
+		if err != nil {
+			c.logger.Printf("Failed to publish the message: %v\n", err)
+			select {
+			case <-timeout:
+				return ErrPublishTimeout
+			case <-ctx.Done():
+				return ctx.Err()
+			case confirmation := <-c.notifyPublish:
+				if confirmation.Ack {
+					return nil
+				}
+			case <-time.After(c.config.PublishConfig.RetryDelay):
+				continue
+			}
+		}
+		timeout = time.After(c.config.PublishConfig.Timeout)
+	}
 }
 
 func (c *Client) setIsReady(isReady bool) {

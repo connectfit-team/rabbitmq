@@ -34,7 +34,6 @@ const (
 // DefaultConnectionConfig is the default configuration used by the client to connect
 // to the server.
 var DefaultConnectionConfig = ConnectionConfig{
-	URL:         "amqp://guest:guest@localhost:5672/",
 	Username:    "guest",
 	Password:    "guest",
 	Host:        "localhost",

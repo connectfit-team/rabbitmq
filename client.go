@@ -11,95 +11,28 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-const (
-	// DefaultConnectionTimeout is the default duration the client will wait until a successful connection.
-	DefaultConnectionTimeout = time.Minute * 1
-	// DefaultConnectionRetryDelay is the delay between each connection attempt.
-	DefaultConnectionRetryDelay = time.Second * 5
-	// DefaultChannelInitializationRetryDelay is the delay between each channel initialization attempt.
-	DefaultChannelInitializationRetryDelay = time.Second * 5
-	// DefaultConsumerInitializationRetryDelay is the delay between each consumer initialization attempt.
-	DefaultConsumerInitializationRetryDelay = time.Second * 5
-)
-
 var (
 	// ErrNotConnect is returned when an operation which requires the client to be connected to the server
 	// is invoked but the client still isn't connected.
 	ErrNotConnected = errors.New("not connected to the server")
 	// ErrAlreadyClosed is retured when trying to close the client more than once.
 	ErrAlreadyClosed = errors.New("the client is already closed")
+	// ErrPublishTimeout is returned when the client did not succeed to publish a message after the configured
+	// publish timeout duration.
+	ErrPublishTimeout = errors.New("publish timeout")
 )
 
-type ClientConfig struct {
-	ConnectionConfig ConnectionConfig
-	ChannelConfig    ChannelConfig
-	QueueConfig      QueueConfig
-	ConsumerConfig   ConsumerConfig
-}
-
-type ConnectionConfig struct {
-	URL         string
-	Username    string
-	Password    string
-	Host        string
-	Port        string
-	VirtualHost string
-	RetryDelay  time.Duration
-	Timeout     time.Duration
-}
-
-var DefaultConnectionConfig = ConnectionConfig{
-	Username:   "guest",
-	Password:   "guest",
-	Host:       "localhost",
-	Port:       "5672",
-	RetryDelay: DefaultConnectionRetryDelay,
-	Timeout:    DefaultConnectionTimeout,
-}
-
-type ChannelConfig struct {
-	PrefetchCount            int
-	PrefetchSize             int
-	Global                   bool
-	InitializationRetryDelay time.Duration
-}
-
-var DefaultChannelConfig = ChannelConfig{
-	PrefetchCount:            1,
-	InitializationRetryDelay: DefaultChannelInitializationRetryDelay,
-}
-
-type ConsumerConfig struct {
-	Name                     string
-	AutoAck                  bool
-	IsExclusive              bool
-	NoWait                   bool
-	NoLocal                  bool
-	InitializationRetryDelay time.Duration
-}
-
-var DefaultConsumerConfig = ConsumerConfig{
-	InitializationRetryDelay: DefaultConsumerInitializationRetryDelay,
-}
-
-type QueueConfig struct {
-	Name        string
-	IsDurable   bool
-	IsExclusive bool
-	AutoDelete  bool
-	NoWait      bool
-}
-
-var DefaultQueueConfig = QueueConfig{
-	IsDurable: true,
-}
+var (
+	// errConnectionTimeout is returned when the client did not succeed to connect to the server after the
+	// configured connection timeout duration.
+	errConnectionTimeout = errors.New("connection timeout")
+)
 
 // Client is a reliable wrapper around an AMQP connection which automatically recover
 // from connection errors.
 type Client struct {
-	config ClientConfig
-	// TODO: Look for other logger.
-	logger          *log.Logger
+	config          ClientConfig
+	logger          *log.Logger // TODO: Use an interface with different log lvl
 	connection      *amqp.Connection
 	connectionMu    sync.RWMutex
 	channel         *amqp.Channel
@@ -109,38 +42,40 @@ type Client struct {
 	readyMu         sync.RWMutex
 	notifyConnClose chan *amqp.Error
 	notifyChanClose chan *amqp.Error
+	notifyPublish   chan amqp.Confirmation
 	cancel          func()
 	wg              sync.WaitGroup
 }
 
 // NewClient creates a new client instance.
 func NewClient(logger *log.Logger, opts ...ClientOption) *Client {
-	client := &Client{
-		logger: logger,
-		config: ClientConfig{
+	cfg := ClientConfig{
 			ConnectionConfig: DefaultConnectionConfig,
 			ChannelConfig:    DefaultChannelConfig,
 			QueueConfig:      DefaultQueueConfig,
 			ConsumerConfig:   DefaultConsumerConfig,
-		},
+		PublishConfig:    DefaultPublishConfig,
 	}
 
 	for _, opt := range opts {
-		opt(client)
+		opt(&cfg)
 	}
 
-	if client.config.ConnectionConfig.URL == "" {
-		client.config.ConnectionConfig.URL = fmt.Sprintf(
+	if cfg.ConnectionConfig.URL == "" {
+		cfg.ConnectionConfig.URL = fmt.Sprintf(
 			"amqp://%s:%s@%s:%s/%s",
-			client.config.ConnectionConfig.Username,
-			client.config.ConnectionConfig.Password,
-			client.config.ConnectionConfig.Host,
-			client.config.ConnectionConfig.Port,
-			client.config.ConnectionConfig.VirtualHost,
+			cfg.ConnectionConfig.Username,
+			cfg.ConnectionConfig.Password,
+			cfg.ConnectionConfig.Host,
+			cfg.ConnectionConfig.Port,
+			cfg.ConnectionConfig.VirtualHost,
 		)
 	}
 
-	return client
+	return &Client{
+		logger: logger,
+		config: cfg,
+	}
 }
 
 // Connect starts a job which will asynchronously try to connect to the server at the given URL
@@ -155,7 +90,10 @@ func (c *Client) Connect(ctx context.Context) error {
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
-		c.handleConnection(connectionHandlerCtx)
+		err := c.handleConnection(connectionHandlerCtx)
+		if err != nil {
+			c.logger.Printf("Connection lost: %v\n", err)
+		}
 	}()
 
 	for {
@@ -173,28 +111,27 @@ func (c *Client) Connect(ctx context.Context) error {
 	}
 }
 
-func (c *Client) handleConnection(ctx context.Context) {
+func (c *Client) handleConnection(ctx context.Context) error {
 	timeout := time.After(c.config.ConnectionConfig.Timeout)
 	for {
 		c.logger.Println("Attempting to connect to the server...")
 		err := c.connect(ctx)
 		if err != nil {
-			c.logger.Printf("Connection failed: %v\n", err)
+			c.logger.Printf("Connection attempt failed: %v\n", err)
 			select {
 			case <-timeout:
-				c.logger.Println("Stopping the connection handler: connection timed out")
-				return
+				return errConnectionTimeout
 			case <-ctx.Done():
-				c.logger.Println(ctx.Err())
-				return
+				return ctx.Err()
 			case <-time.After(c.config.ConnectionConfig.RetryDelay):
 				continue
 			}
 		}
 		c.logger.Println("Succesfully connected!")
 
-		if done := c.handleInit(ctx); done {
-			break
+		err = c.handleChannel(ctx)
+		if err != nil {
+			return err
 		}
 
 		c.setIsReady(false)
@@ -203,19 +140,18 @@ func (c *Client) handleConnection(ctx context.Context) {
 	}
 }
 
-func (c *Client) handleInit(ctx context.Context) bool {
+func (c *Client) handleChannel(ctx context.Context) error {
 	for {
 		c.logger.Println("Attempting to initialize the channel and the queue...")
-		err := c.init(ctx)
+		err := c.initChannel(ctx)
 		if err != nil {
 			c.logger.Printf("Failed to initialize the channel and the queue: %v\n", err)
 			select {
 			case <-ctx.Done():
-				c.logger.Println(ctx.Err())
-				return true
+				return ctx.Err()
 			case err = <-c.notifyConnClose:
 				c.logger.Printf("Connection closed: %v\n", err)
-				return false
+				return nil
 			case <-time.After(c.config.ChannelConfig.InitializationRetryDelay):
 				continue
 			}
@@ -223,11 +159,10 @@ func (c *Client) handleInit(ctx context.Context) bool {
 
 		select {
 		case <-ctx.Done():
-			c.logger.Println(ctx.Err())
-			return true
+			return ctx.Err()
 		case err = <-c.notifyConnClose:
 			c.logger.Printf("Connection closed: %v\n", err)
-			return false
+			return nil
 		case err := <-c.notifyChanClose:
 			c.logger.Printf("Channel closed: %v\n", err)
 		}
@@ -246,8 +181,13 @@ func (c *Client) connect(ctx context.Context) error {
 	return nil
 }
 
-func (c *Client) init(ctx context.Context) error {
+func (c *Client) initChannel(ctx context.Context) error {
 	ch, err := c.getConnection().Channel()
+	if err != nil {
+		return err
+	}
+
+	err = ch.Confirm(false)
 	if err != nil {
 		return err
 	}
@@ -318,8 +258,6 @@ func (c *Client) Close() error {
 // to stop the delivery.
 //
 // The client must be connected to use this method.
-// TODO: Might want to implement a consumer/channel pool in the future if we encounter
-// any performance issue.
 func (c *Client) Consume(ctx context.Context) (<-chan amqp.Delivery, error) {
 	if !c.isReady() {
 		return nil, ErrNotConnected
@@ -392,24 +330,11 @@ func (c *Client) isReady() bool {
 	return c.ready
 }
 
-func (c *Client) setChannel(channel *amqp.Channel) {
-	c.channelMu.Lock()
-	defer c.channelMu.Unlock()
-	c.channel = channel
-	c.notifyChanClose = make(chan *amqp.Error, 1)
-	c.channel.NotifyClose(c.notifyChanClose)
-}
-
-func (c *Client) getChannel() *amqp.Channel {
-	c.channelMu.RLock()
-	defer c.channelMu.RUnlock()
-	return c.channel
-}
-
 func (c *Client) setConnection(connection *amqp.Connection) {
 	c.connectionMu.Lock()
 	defer c.connectionMu.Unlock()
 	c.connection = connection
+
 	c.notifyConnClose = make(chan *amqp.Error, 1)
 	c.connection.NotifyClose(c.notifyConnClose)
 }
@@ -418,4 +343,23 @@ func (c *Client) getConnection() *amqp.Connection {
 	c.connectionMu.RLock()
 	defer c.connectionMu.RUnlock()
 	return c.connection
+}
+
+func (c *Client) setChannel(channel *amqp.Channel) {
+	c.channelMu.Lock()
+	defer c.channelMu.Unlock()
+	c.channel = channel
+
+	c.notifyChanClose = make(chan *amqp.Error, 1)
+	c.channel.NotifyClose(c.notifyChanClose)
+
+	c.notifyPublish = make(chan amqp.Confirmation)
+	c.channel.NotifyPublish(c.notifyPublish)
+
+}
+
+func (c *Client) getChannel() *amqp.Channel {
+	c.channelMu.RLock()
+	defer c.channelMu.RUnlock()
+	return c.channel
 }

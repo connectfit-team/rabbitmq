@@ -344,14 +344,15 @@ func (c *Client) Publish(ctx context.Context, msg amqp.Publishing) error {
 				return ErrPublishTimeout
 			case <-ctx.Done():
 				return ctx.Err()
-			case confirmation := <-c.notifyPublish:
-				if confirmation.Ack {
-					return nil
-				}
 			case <-time.After(c.config.PublishConfig.RetryDelay):
 				continue
 			}
 		}
+		confirmation := <-c.notifyPublish
+		if confirmation.Ack {
+			return nil
+		}
+
 		timeout = time.After(c.config.PublishConfig.Timeout)
 	}
 }

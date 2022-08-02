@@ -198,7 +198,7 @@ func (c *Client) initChannel(ctx context.Context) error {
 		c.config.QueueConfig.AutoDelete,
 		c.config.QueueConfig.IsExclusive,
 		c.config.QueueConfig.NoWait,
-		nil,
+		c.config.QueueConfig.Args,
 	)
 	if err != nil {
 		return err
@@ -279,7 +279,7 @@ func (c *Client) Consume(ctx context.Context) (<-chan amqp.Delivery, error) {
 				c.config.ConsumerConfig.IsExclusive,
 				c.config.ConsumerConfig.NoLocal,
 				c.config.ConsumerConfig.NoWait,
-				nil,
+				c.config.ConsumerConfig.Args,
 			)
 			if err != nil {
 				c.logger.Printf("Could not start to consume the deliveries: %v\n", err)

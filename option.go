@@ -106,3 +106,18 @@ func WithPrefetchCount(count int) ClientOption {
 		c.ChannelConfig.PrefetchCount = count
 	}
 }
+
+// WithQueueArguments configures the arguments that pass to QueueDeclare
+// https://www.rabbitmq.com/queues.html#optional-arguments
+func WithQueueArguments(key string, value interface{}) ClientOption {
+	return func(c *ClientConfig) {
+		c.QueueConfig.Args[key] = value
+	}
+}
+
+// WithConsumeArguments configures the arguments that pass to Consume
+func WithConsumeArguments(key string, value interface{}) ClientOption {
+	return func(c *ClientConfig) {
+		c.ConsumerConfig.Args[key] = value
+	}
+}

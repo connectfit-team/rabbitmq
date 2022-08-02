@@ -108,6 +108,7 @@ type ConsumerConfig struct {
 	NoWait                   bool
 	NoLocal                  bool
 	InitializationRetryDelay time.Duration
+	Args                     map[string]interface{}
 }
 
 const (
@@ -123,6 +124,7 @@ var DefaultConsumerConfig = ConsumerConfig{
 	NoWait:                   false,
 	NoLocal:                  false,
 	InitializationRetryDelay: DefaultConsumerInitializationRetryDelay,
+	Args:                     make(map[string]interface{}),
 }
 
 // ConsumerConfig contains all the configurable parameters used by a client instance to declare a
@@ -133,6 +135,7 @@ type QueueConfig struct {
 	IsExclusive bool
 	AutoDelete  bool
 	NoWait      bool
+	Args        map[string]interface{}
 }
 
 // DefaultConsumerConfig is the default configuration used by a client instance to declare queues.
@@ -142,4 +145,5 @@ var DefaultQueueConfig = QueueConfig{
 	IsExclusive: false,
 	AutoDelete:  false,
 	NoWait:      false,
+	Args:        make(map[string]interface{}),
 }

@@ -5,11 +5,13 @@
 ### RabbitMQ Client provide a simple yet robust abstraction around [the most widely used Go AMQP 0.9.1 client](https://github.com/rabbitmq/amqp091-go). This package has been designed to ease the interactions with the RabbitMQ server and let the developer focus on what really matter.
 
 # ⚙️ Installation
+
 </br>
 
 `go get bitbucket.org/connectfit/rabbitmq`
 
 # ⚡️ Quickstart
+
 </br>
 
 ```Go
@@ -17,11 +19,11 @@ package main
 
 import (
     "log"
-    
+
     "bitbucket.org/connectfit/rabbitmq"
 )
 
-func main() {    
+func main() {
     ctx := context.Background()
 
 	logger := log.New(os.Stderr, "RabbitMQ Client: ",log.LstdFlags)
@@ -44,12 +46,14 @@ func main() {
 ```
 
 # 📖 Features
+
 </br>
 
 * Automatic connection recovery(including channel and consumers recovery)
 * Context handling(gracefully shutdown on context cancellation)
 
-# 📚 Options
+# 🪄 Options
+
 </br>
 
 The client originally use a default configuration to connect to a RabbitMQ instance locally but it is actually highly configurable through functional options:
@@ -68,3 +72,11 @@ rabbitClient := rabbitmq.NewClient(
 		rabbitmq.WithConnectionTimeout(time.Minute * 1),
 	)
 ```
+
+# 📚 Documentation
+
+For further information you can generates documentation for the project through the [`godoc`](https://pkg.go.dev/golang.org/x/tools/cmd/godoc?utm_source=godoc) command:
+
+```godoc -http=:[port]```
+
+And then browse the documentation at [`http://localhost:[port]/pkg/bitbucket.org/connectfit/rabbitmq/`](http://localhost:6060/pkg/bitbucket.org/connectfit/rabbitmq/)

@@ -51,6 +51,7 @@ func main() {
 
 * Automatic connection recovery(including channel and consumers recovery)
 * Context handling(gracefully shutdown on context cancellation)
+* Delayed publishing
 
 # 🪄 Options
 

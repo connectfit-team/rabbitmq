@@ -282,7 +282,7 @@ func (c *Client) Consume(ctx context.Context, opts ...ConsumerOption) (<-chan am
 
 		err = c.getChannel().QueueBind(
 			queue.Name,
-			"",
+			consumerCfg.QueueBindRoutingKey,
 			consumerCfg.ExchangeConfig.Name,
 			false,
 			nil,

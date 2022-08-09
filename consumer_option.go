@@ -97,6 +97,12 @@ func WithConsumedExchangeDelayedMessageExchangeType(exchangeType ExchangeType) C
 	}
 }
 
+func WithConsumedQueueBindingRoutingKey(key string) ConsumerOption {
+	return func(cc *ConsumerConfig) {
+		cc.QueueConfig.QueueBindRoutingKey = key
+	}
+}
+
 // WithConsumedQueueName specifies the name of the queue the consumer will consume from.
 // The queue name MAY be empty, in which case the server will create a new queue with a unique generated name.
 // Queue names starting with "amq." are reserved for pre-declared and standardised queues.

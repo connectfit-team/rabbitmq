@@ -51,6 +51,7 @@ func main() {
 
 * Automatic connection recovery(including channel and consumers recovery)
 * Context handling(gracefully shutdown on context cancellation)
+* Delayed publishing
 
 # 🪄 Options
 
@@ -75,8 +76,16 @@ rabbitClient := rabbitmq.NewClient(
 
 # 📚 Documentation
 
+</br>
+
 For further information you can generates documentation for the project through the [`godoc`](https://pkg.go.dev/golang.org/x/tools/cmd/godoc?utm_source=godoc) command:
 
 ```godoc -http=:[port]```
 
 And then browse the documentation at [`http://localhost:[port]/pkg/bitbucket.org/connectfit/rabbitmq/`](http://localhost:6060/pkg/bitbucket.org/connectfit/rabbitmq/)
+
+# 📝 To Do List
+
+</br>
+
+* Add examples

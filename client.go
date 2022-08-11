@@ -2,6 +2,7 @@ package rabbitmq
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -15,8 +16,6 @@ var (
 	// ErrNotConnect is returned when an operation which requires the client to be connected to the server
 	// is invoked but the client still isn't connected.
 	ErrNotConnected = errors.New("not connected to the server")
-	// ErrAlreadyClosed is retured when trying to close the client more than once.
-	ErrAlreadyClosed = errors.New("the client is already closed")
 	// ErrPublishTimeout is returned when the client did not succeed to publish a message after the configured
 	// publish timeout duration.
 	ErrPublishTimeout = errors.New("publish timeout")
@@ -32,12 +31,11 @@ var (
 // from connection errors.
 type Client struct {
 	config          ClientConfig
-	logger          *log.Logger // TODO: Use an interface with different log lvl
+	logger          *log.Logger // TODO: Look for another logger
 	connection      *amqp.Connection
 	connectionMu    sync.RWMutex
 	channel         *amqp.Channel
 	channelMu       sync.RWMutex
-	queue           amqp.Queue
 	ready           bool
 	readyMu         sync.RWMutex
 	notifyConnClose chan *amqp.Error
@@ -52,15 +50,13 @@ func NewClient(logger *log.Logger, opts ...ClientOption) *Client {
 	cfg := ClientConfig{
 		ConnectionConfig: DefaultConnectionConfig,
 		ChannelConfig:    DefaultChannelConfig,
-		QueueConfig:      DefaultQueueConfig,
-		ConsumerConfig:   DefaultConsumerConfig,
-		PublishConfig:    DefaultPublishConfig,
 	}
 
 	for _, opt := range opts {
 		opt(&cfg)
 	}
 
+	// Format the URL if no URL provided through the options.
 	if cfg.ConnectionConfig.URL == "" {
 		cfg.ConnectionConfig.URL = fmt.Sprintf(
 			"amqp://%s:%s@%s:%s/%s",
@@ -85,6 +81,8 @@ func NewClient(logger *log.Logger, opts ...ClientOption) *Client {
 // The caller must as well call the Close() method when he is done with the client in order
 // to avoid memory leaks.
 func (c *Client) Connect(ctx context.Context) error {
+	// Inner context of the client's connection lifetime.
+	// Should call the Close method to cancel it.
 	connectionHandlerCtx, cancel := context.WithCancel(context.Background())
 	c.cancel = cancel
 	c.wg.Add(1)
@@ -192,25 +190,10 @@ func (c *Client) initChannel(ctx context.Context) error {
 		return err
 	}
 
-	q, err := ch.QueueDeclare(
-		c.config.QueueConfig.Name,
-		c.config.QueueConfig.IsDurable,
-		c.config.QueueConfig.AutoDelete,
-		c.config.QueueConfig.IsExclusive,
-		c.config.QueueConfig.NoWait,
-		c.config.QueueConfig.Args,
-	)
-	if err != nil {
-		return err
-	}
-	// Queue can be declared without a name and they'll be given a random one. Therefore
-	// we need to keep the queue around to access its name when creating new consumers.
-	c.queue = q
-
 	err = ch.Qos(
 		c.config.ChannelConfig.PrefetchCount,
 		c.config.ChannelConfig.PrefetchSize,
-		c.config.ChannelConfig.Global,
+		c.config.ChannelConfig.IsGlobal,
 	)
 	if err != nil {
 		return err
@@ -258,9 +241,14 @@ func (c *Client) Close() error {
 // to stop the delivery.
 //
 // The client must be connected to use this method.
-func (c *Client) Consume(ctx context.Context) (<-chan amqp.Delivery, error) {
+func (c *Client) Consume(ctx context.Context, opts ...ConsumerOption) (<-chan amqp.Delivery, error) {
 	if !c.isReady() {
 		return nil, ErrNotConnected
+	}
+
+	consumerCfg := DefaultConsumerConfig
+	for _, opt := range opts {
+		opt(&consumerCfg)
 	}
 
 	// TODO: Benchmark the buffer size.
@@ -273,20 +261,20 @@ func (c *Client) Consume(ctx context.Context) (<-chan amqp.Delivery, error) {
 		for {
 			c.logger.Println("Attempting to start a consumer...")
 			msgs, err := c.getChannel().Consume(
-				c.queue.Name,
-				c.config.ConsumerConfig.Name,
-				c.config.ConsumerConfig.AutoAck,
-				c.config.ConsumerConfig.IsExclusive,
-				c.config.ConsumerConfig.NoLocal,
-				c.config.ConsumerConfig.NoWait,
-				c.config.ConsumerConfig.Args,
+				consumerCfg.QueueName,
+				consumerCfg.Name,
+				consumerCfg.AutoAck,
+				consumerCfg.IsExclusive,
+				consumerCfg.IsNoLocal,
+				consumerCfg.IsNoWait,
+				consumerCfg.Arguments,
 			)
 			if err != nil {
 				c.logger.Printf("Could not start to consume the deliveries: %v\n", err)
 				select {
 				case <-ctx.Done():
 					return
-				case <-time.After(c.config.ConsumerConfig.InitializationRetryDelay):
+				case <-time.After(consumerCfg.InitializationRetryDelay):
 					continue
 				}
 			}
@@ -299,7 +287,7 @@ func (c *Client) Consume(ctx context.Context) (<-chan amqp.Delivery, error) {
 				case <-ctx.Done():
 					if !done {
 						c.logger.Println("Canceling the delivery...")
-						c.getChannel().Cancel(c.config.ConsumerConfig.Name, c.config.ConsumerConfig.NoWait)
+						c.getChannel().Cancel(consumerCfg.Name, consumerCfg.IsNoWait)
 						done = true
 					}
 				case msg, ok := <-msgs:
@@ -323,18 +311,31 @@ func (c *Client) Consume(ctx context.Context) (<-chan amqp.Delivery, error) {
 // the configured timeout.
 //
 // The client must be connected to use this method.
-func (c *Client) Publish(ctx context.Context, msg amqp.Publishing) error {
+func (c *Client) Publish(ctx context.Context, msg amqp.Publishing, opts ...PublishOption) error {
 	if !c.isReady() {
 		return ErrNotConnected
 	}
 
-	timeout := time.After(c.config.PublishConfig.Timeout)
+	publishCfg := DefaultPublishConfig
+	for _, opt := range opts {
+		opt(&publishCfg)
+	}
+
+	timeout := time.After(publishCfg.Timeout)
 	for {
-		err := c.channel.Publish(
-			c.config.PublishConfig.Exchange,
-			c.queue.Name,
-			c.config.PublishConfig.Mandatory,
-			c.config.PublishConfig.Immediate,
+		if publishCfg.TTL != "" {
+			msg.Expiration = publishCfg.TTL
+		}
+		if publishCfg.MessageHeaders != nil {
+			msg.Headers = publishCfg.MessageHeaders
+		}
+		b, _ := json.MarshalIndent(msg, "", " ")
+		c.logger.Printf(string(b))
+		err := c.getChannel().Publish(
+			publishCfg.ExchangeName,
+			publishCfg.RoutingKey,
+			publishCfg.IsMandatory,
+			publishCfg.IsImmediate,
 			msg,
 		)
 		if err != nil {
@@ -344,7 +345,7 @@ func (c *Client) Publish(ctx context.Context, msg amqp.Publishing) error {
 				return ErrPublishTimeout
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(c.config.PublishConfig.RetryDelay):
+			case <-time.After(publishCfg.RetryDelay):
 				continue
 			}
 		}
@@ -353,8 +354,63 @@ func (c *Client) Publish(ctx context.Context, msg amqp.Publishing) error {
 			return nil
 		}
 
-		timeout = time.After(c.config.PublishConfig.Timeout)
+		timeout = time.After(publishCfg.Timeout)
 	}
+}
+
+// ExchangeDeclare creates an exchange if it does not already exist, and if the exchange exists,
+// verifies that it is of the correct and expected class.
+func (c *Client) ExchangeDeclare(name string, opts ...ExchangeOption) error {
+	if !c.isReady() {
+		return ErrNotConnected
+	}
+
+	exchangeCfg := DefaultExchangeConfig
+
+	for _, opt := range opts {
+		opt(&exchangeCfg)
+	}
+
+	return c.getChannel().ExchangeDeclare(
+		name,
+		exchangeCfg.Type.String(),
+		exchangeCfg.IsDurable,
+		exchangeCfg.IsAutoDelete,
+		exchangeCfg.IsInternal,
+		exchangeCfg.IsNoWait,
+		exchangeCfg.Arguments,
+	)
+}
+
+// QueueDeclare creates a queue if it does not already exist, and if the queue exists,
+// verifies that it is of the correct and expected class.
+func (c *Client) QueueDeclare(name string, opts ...QueueOption) (amqp.Queue, error) {
+	if !c.isReady() {
+		return amqp.Queue{}, ErrNotConnected
+	}
+
+	queueCfg := DefaultQueueConfig
+
+	for _, opt := range opts {
+		opt(&queueCfg)
+	}
+
+	return c.getChannel().QueueDeclare(
+		name,
+		queueCfg.IsDurable,
+		queueCfg.AutoDelete,
+		queueCfg.IsExclusive,
+		queueCfg.NoWait,
+		queueCfg.Arguments,
+	)
+}
+
+// QueueBind binds a queue to an exchange.
+func (c *Client) QueueBind(queue, exchange, routingKey string) error {
+	if !c.isReady() {
+		return ErrNotConnected
+	}
+	return c.getChannel().QueueBind(queue, routingKey, exchange, false, nil)
 }
 
 func (c *Client) setIsReady(isReady bool) {

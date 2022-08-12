@@ -14,65 +14,95 @@
 
 </br>
 
+### 📖  Publisher
+
 ```Go
 package main
 
 import (
-    "log"
+	"context"
+	"log"
+	"os"
 
-    "bitbucket.org/connectfit/rabbitmq"
+	"bitbucket.org/connectfit/rabbitmq"
+	"github.com/rabbitmq/amqp091-go"
 )
 
 func main() {
-    ctx := context.Background()
+	ctx := context.Background()
 
-	logger := log.New(os.Stderr, "RabbitMQ Client: ",log.LstdFlags)
+	logger := log.New(os.Stdout, "RabbitMQ Client :", log.LstdFlags)
 
-    client := rabbitmq.NewClient(logger)
-	err := rabbitClient.Connect(connectCtx)
+	c := rabbitmq.NewClient(
+		logger,
+	)
+	err := c.Connect(ctx)
 	if err != nil {
 		panic(err)
 	}
-	defer client.Close()
 
-    msgs, err := client.Consume(ctx)
-    if err != nil {
-        panic(err)
-    }
-    for msg := range msgs {
-        // Handle your delivery
-    }
+	msg := amqp091.Publishing{
+		Body: []byte("Created user foo"),
+	}
+	err = c.Publish(ctx, msg, "user.created")
+	if err != nil {
+		panic(err)
+	}
 }
 ```
 
-# 📖 Features
+
+### 📖  Consumer
+
+```Go
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"os"
+
+	"bitbucket.org/connectfit/rabbitmq"
+)
+
+func main() {
+	ctx := context.Background()
+
+	logger := log.New(os.Stdout, "RabbitMQ client: ", 0)
+
+	c := rabbitmq.NewClient(logger)
+	err := c.Connect(ctx)
+	if err != nil {
+		panic(err)
+	}
+	defer c.Close()
+
+	queue, err := c.QueueDeclare("user.created")
+	if err != nil {
+		panic(err)
+	}
+
+	msgs, err := c.Consume(ctx, queue.Name)
+	if err != nil {
+		panic(err)
+	}
+	for msg := range msgs {
+		// Handle the messages
+		fmt.Printf("Event: %s\n", string(msg.Body))
+
+		// Acknowledge the message to the server
+		msg.Ack(false)
+	}
+}
+```
+
+# 🪄 Features
 
 </br>
 
 * Automatic connection recovery(including channel and consumers recovery)
 * Context handling(gracefully shutdown on context cancellation)
-* Delayed publishing
-
-# 🪄 Options
-
-</br>
-
-The client originally use a default configuration to connect to a RabbitMQ instance locally but it is actually highly configurable through functional options:
-
-```Go
-rabbitClient := rabbitmq.NewClient(
-		logger,
-		rabbitmq.WithUsername("username"),
-		rabbitmq.WithPassword("password"),
-		rabbitmq.WithHost("host"),
-		rabbitmq.WithPort("port"),
-		rabbitmq.WithQueueName("queue-name"),
-		rabbitmq.WithConsumerName("consumer-name"),
-		rabbitmq.WithChannelInitializationRetryDelay(time.Second * 5),
-		rabbitmq.WithConnectionRetryDelay(time.Second * 5),
-		rabbitmq.WithConnectionTimeout(time.Minute * 1),
-	)
-```
 
 # 📚 Documentation
 
@@ -84,8 +114,61 @@ For further information you can generates documentation for the project through 
 
 And then browse the documentation at [`http://localhost:[port]/pkg/bitbucket.org/connectfit/rabbitmq/`](http://localhost:6060/pkg/bitbucket.org/connectfit/rabbitmq/)
 
-# 📝 To Do List
+# 👀 Examples
 
 </br>
 
-* Add examples
+### 📖 Publish a delayed message (using the RabbitMQ delayed message exchange plugin)
+
+```Go
+package main
+
+import (
+	"context"
+	"log"
+	"os"
+	"time"
+
+	"bitbucket.org/connectfit/rabbitmq"
+	"github.com/rabbitmq/amqp091-go"
+)
+
+func main() {
+	ctx := context.Background()
+
+	logger := log.New(os.Stdout, "RabbitMQ Client :", log.LstdFlags)
+
+	c := rabbitmq.NewClient(
+		logger,
+	)
+	err := c.Connect(ctx)
+	if err != nil {
+		panic(err)
+	}
+
+	err = c.ExchangeDeclare(
+		"user",
+		rabbitmq.WithDelayedMessageExchangeType(rabbitmq.DirectExchangeType),
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	msg := amqp091.Publishing{
+		ContentType: "text/plain",
+		Body:        []byte("Created user foo"),
+	}
+	err = c.Publish(
+		ctx,
+		msg,
+		"user.created",
+		rabbitmq.WithPublishExchangeName("user"),
+		rabbitmq.WithMessageDelay(time.Second*5),
+	)
+	if err != nil {
+		panic(err)
+	}
+}
+```
+
+# 📝 To Do List

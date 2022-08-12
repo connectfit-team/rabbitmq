@@ -2,11 +2,11 @@ package rabbitmq
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -33,11 +33,8 @@ type Client struct {
 	config          ClientConfig
 	logger          *log.Logger // TODO: Look for another logger
 	connection      *amqp.Connection
-	connectionMu    sync.RWMutex
 	channel         *amqp.Channel
-	channelMu       sync.RWMutex
-	ready           bool
-	readyMu         sync.RWMutex
+	isReady         atomic.Bool
 	notifyConnClose chan *amqp.Error
 	notifyChanClose chan *amqp.Error
 	notifyPublish   chan amqp.Confirmation
@@ -88,6 +85,7 @@ func (c *Client) Connect(ctx context.Context) error {
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
+
 		err := c.handleConnection(connectionHandlerCtx)
 		if err != nil {
 			c.logger.Printf("Connection lost: %v\n", err)
@@ -102,7 +100,7 @@ func (c *Client) Connect(ctx context.Context) error {
 			return ctx.Err()
 		default:
 			// TODO: Might check for a cleaner way to do this.
-			if c.isReady() {
+			if c.isReady.Load() {
 				return nil
 			}
 		}
@@ -132,7 +130,7 @@ func (c *Client) handleConnection(ctx context.Context) error {
 			return err
 		}
 
-		c.setIsReady(false)
+		c.isReady.Store(false)
 
 		timeout = time.After(c.config.ConnectionConfig.Timeout)
 	}
@@ -165,7 +163,7 @@ func (c *Client) handleChannel(ctx context.Context) error {
 			c.logger.Printf("Channel closed: %v\n", err)
 		}
 
-		c.setIsReady(false)
+		c.isReady.Store(false)
 	}
 }
 
@@ -180,7 +178,7 @@ func (c *Client) connect(ctx context.Context) error {
 }
 
 func (c *Client) initChannel(ctx context.Context) error {
-	ch, err := c.getConnection().Channel()
+	ch, err := c.connection.Channel()
 	if err != nil {
 		return err
 	}
@@ -203,37 +201,8 @@ func (c *Client) initChannel(ctx context.Context) error {
 
 	c.logger.Println("Successfully initialized channel and queue!")
 
-	c.setIsReady(true)
+	c.isReady.Store(true)
 
-	return nil
-}
-
-// Close gracefully shutdown the client. It must be called after any call to Connect().
-// It will stop the background job handling the client's connection and close both the
-// AMQP channel and connection.
-func (c *Client) Close() error {
-	c.logger.Println("Closing the client...")
-	// Cancel the context of the background connection handler.
-	c.cancel()
-	c.wg.Wait()
-
-	if !c.getChannel().IsClosed() {
-		err := c.getChannel().Close()
-		if err != nil {
-			return err
-		}
-	}
-
-	if !c.getConnection().IsClosed() {
-		err := c.getConnection().Close()
-		if err != nil {
-			return err
-		}
-	}
-
-	c.setIsReady(false)
-
-	c.logger.Println("Successfully closed the client.")
 	return nil
 }
 
@@ -241,8 +210,8 @@ func (c *Client) Close() error {
 // to stop the delivery.
 //
 // The client must be connected to use this method.
-func (c *Client) Consume(ctx context.Context, opts ...ConsumerOption) (<-chan amqp.Delivery, error) {
-	if !c.isReady() {
+func (c *Client) Consume(ctx context.Context, queue string, opts ...ConsumerOption) (<-chan amqp.Delivery, error) {
+	if !c.isReady.Load() {
 		return nil, ErrNotConnected
 	}
 
@@ -260,7 +229,7 @@ func (c *Client) Consume(ctx context.Context, opts ...ConsumerOption) (<-chan am
 		var done bool
 		for {
 			c.logger.Println("Attempting to start a consumer...")
-			msgs, err := c.getChannel().Consume(
+			msgs, err := c.channel.Consume(
 				consumerCfg.QueueName,
 				consumerCfg.Name,
 				consumerCfg.AutoAck,
@@ -287,7 +256,6 @@ func (c *Client) Consume(ctx context.Context, opts ...ConsumerOption) (<-chan am
 				case <-ctx.Done():
 					if !done {
 						c.logger.Println("Canceling the delivery...")
-						c.getChannel().Cancel(consumerCfg.Name, consumerCfg.IsNoWait)
 						done = true
 					}
 				case msg, ok := <-msgs:
@@ -311,8 +279,8 @@ func (c *Client) Consume(ctx context.Context, opts ...ConsumerOption) (<-chan am
 // the configured timeout.
 //
 // The client must be connected to use this method.
-func (c *Client) Publish(ctx context.Context, msg amqp.Publishing, opts ...PublishOption) error {
-	if !c.isReady() {
+func (c *Client) Publish(ctx context.Context, msg amqp.Publishing, routingKey string, opts ...PublishOption) error {
+	if !c.isReady.Load() {
 		return ErrNotConnected
 	}
 
@@ -329,11 +297,10 @@ func (c *Client) Publish(ctx context.Context, msg amqp.Publishing, opts ...Publi
 		if publishCfg.MessageHeaders != nil {
 			msg.Headers = publishCfg.MessageHeaders
 		}
-		b, _ := json.MarshalIndent(msg, "", " ")
-		c.logger.Printf(string(b))
-		err := c.getChannel().Publish(
+		err := c.channel.PublishWithContext(
+			ctx,
 			publishCfg.ExchangeName,
-			publishCfg.RoutingKey,
+			routingKey,
 			publishCfg.IsMandatory,
 			publishCfg.IsImmediate,
 			msg,
@@ -361,7 +328,7 @@ func (c *Client) Publish(ctx context.Context, msg amqp.Publishing, opts ...Publi
 // ExchangeDeclare creates an exchange if it does not already exist, and if the exchange exists,
 // verifies that it is of the correct and expected class.
 func (c *Client) ExchangeDeclare(name string, opts ...ExchangeOption) error {
-	if !c.isReady() {
+	if !c.isReady.Load() {
 		return ErrNotConnected
 	}
 
@@ -371,7 +338,7 @@ func (c *Client) ExchangeDeclare(name string, opts ...ExchangeOption) error {
 		opt(&exchangeCfg)
 	}
 
-	return c.getChannel().ExchangeDeclare(
+	return c.channel.ExchangeDeclare(
 		name,
 		exchangeCfg.Type.String(),
 		exchangeCfg.IsDurable,
@@ -385,7 +352,7 @@ func (c *Client) ExchangeDeclare(name string, opts ...ExchangeOption) error {
 // QueueDeclare creates a queue if it does not already exist, and if the queue exists,
 // verifies that it is of the correct and expected class.
 func (c *Client) QueueDeclare(name string, opts ...QueueOption) (amqp.Queue, error) {
-	if !c.isReady() {
+	if !c.isReady.Load() {
 		return amqp.Queue{}, ErrNotConnected
 	}
 
@@ -395,7 +362,7 @@ func (c *Client) QueueDeclare(name string, opts ...QueueOption) (amqp.Queue, err
 		opt(&queueCfg)
 	}
 
-	return c.getChannel().QueueDeclare(
+	return c.channel.QueueDeclare(
 		name,
 		queueCfg.IsDurable,
 		queueCfg.AutoDelete,
@@ -407,54 +374,55 @@ func (c *Client) QueueDeclare(name string, opts ...QueueOption) (amqp.Queue, err
 
 // QueueBind binds a queue to an exchange.
 func (c *Client) QueueBind(queue, exchange, routingKey string) error {
-	if !c.isReady() {
+	if !c.isReady.Load() {
 		return ErrNotConnected
 	}
-	return c.getChannel().QueueBind(queue, routingKey, exchange, false, nil)
+
+	return c.channel.QueueBind(queue, routingKey, exchange, false, nil)
 }
 
-func (c *Client) setIsReady(isReady bool) {
-	c.readyMu.Lock()
-	defer c.readyMu.Unlock()
-	c.ready = isReady
-}
+// Close gracefully shutdown the client. It must be called after any call to Connect().
+// It will stop the background job handling the client's connection and close both the
+// AMQP channel and connection.
+func (c *Client) Close() error {
+	c.logger.Println("Closing the client...")
+	// Cancel the context of the background connection handler.
+	c.cancel()
+	c.wg.Wait()
 
-func (c *Client) isReady() bool {
-	c.readyMu.RLock()
-	defer c.readyMu.RUnlock()
-	return c.ready
+	if !c.channel.IsClosed() {
+		err := c.channel.Close()
+		if err != nil {
+			return err
+		}
+	}
+
+	if !c.connection.IsClosed() {
+		err := c.connection.Close()
+		if err != nil {
+			return err
+		}
+	}
+
+	c.isReady.Store(false)
+
+	c.logger.Println("Successfully closed the client.")
+	return nil
 }
 
 func (c *Client) setConnection(connection *amqp.Connection) {
-	c.connectionMu.Lock()
-	defer c.connectionMu.Unlock()
 	c.connection = connection
 
 	c.notifyConnClose = make(chan *amqp.Error, 1)
 	c.connection.NotifyClose(c.notifyConnClose)
 }
 
-func (c *Client) getConnection() *amqp.Connection {
-	c.connectionMu.RLock()
-	defer c.connectionMu.RUnlock()
-	return c.connection
-}
-
 func (c *Client) setChannel(channel *amqp.Channel) {
-	c.channelMu.Lock()
-	defer c.channelMu.Unlock()
 	c.channel = channel
 
 	c.notifyChanClose = make(chan *amqp.Error, 1)
 	c.channel.NotifyClose(c.notifyChanClose)
 
-	c.notifyPublish = make(chan amqp.Confirmation)
+	c.notifyPublish = make(chan amqp.Confirmation, 1)
 	c.channel.NotifyPublish(c.notifyPublish)
-
-}
-
-func (c *Client) getChannel() *amqp.Channel {
-	c.channelMu.RLock()
-	defer c.channelMu.RUnlock()
-	return c.channel
 }

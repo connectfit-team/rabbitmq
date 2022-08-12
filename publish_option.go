@@ -9,6 +9,13 @@ import (
 // PublishOption configures a Publish call.
 type PublishOption func(*PublishConfig)
 
+// WithPublishExchangeName specifies the name of the exchange to publish to.
+func WithPublishExchangeName(name string) PublishOption {
+	return func(pc *PublishConfig) {
+		pc.ExchangeName = name
+	}
+}
+
 // WithPublishRoutingKey specifies the routing key for the message. The routing key
 // is used for routing messages depending on the exchange configuration.
 func WithPublishRoutingKey(routingKey string) PublishOption {

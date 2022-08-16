@@ -16,15 +16,6 @@ func WithConsumedQueueName(name string) ConsumerOption {
 	}
 }
 
-// WithConsumerName specifies the name of the consumer.
-// The consumer tag is local to a channel, so two clients can use the same consumer tags.
-// If this field is empty the server will generate a unique tag.
-func WithConsumerName(name string) ConsumerOption {
-	return func(cc *ConsumerConfig) {
-		cc.Name = name
-	}
-}
-
 // WithConsumerAutoAck determines whether the server expect acknowledgments for messages
 // from the consumer or not.
 // That is, when a message is delivered to the client the server assumes the delivery will succeed and immediately dequeues it.

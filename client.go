@@ -210,7 +210,7 @@ func (c *Client) initChannel(ctx context.Context) error {
 // to stop the delivery.
 //
 // The client must be connected to use this method.
-func (c *Client) Consume(ctx context.Context, queue string, opts ...ConsumerOption) (<-chan amqp.Delivery, error) {
+func (c *Client) Consume(ctx context.Context, consumerName, queue string, opts ...ConsumerOption) (<-chan amqp.Delivery, error) {
 	if !c.isReady.Load() {
 		return nil, ErrNotConnected
 	}
@@ -231,7 +231,7 @@ func (c *Client) Consume(ctx context.Context, queue string, opts ...ConsumerOpti
 			c.logger.Println("Attempting to start a consumer...")
 			msgs, err := c.channel.Consume(
 				consumerCfg.QueueName,
-				consumerCfg.Name,
+				consumerName,
 				consumerCfg.AutoAck,
 				consumerCfg.IsExclusive,
 				consumerCfg.IsNoLocal,
@@ -256,6 +256,12 @@ func (c *Client) Consume(ctx context.Context, queue string, opts ...ConsumerOpti
 				case <-ctx.Done():
 					if !done {
 						c.logger.Println("Canceling the delivery...")
+						err := c.channel.Cancel(consumerName, consumerCfg.IsNoWait)
+						if err != nil {
+							c.logger.Printf("Could not cancel the consumer: %v\n", err)
+							return
+						}
+
 						done = true
 					}
 				case msg, ok := <-msgs:
@@ -266,6 +272,7 @@ func (c *Client) Consume(ctx context.Context, queue string, opts ...ConsumerOpti
 						}
 						break loop
 					}
+
 					out <- msg
 				}
 			}

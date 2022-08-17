@@ -18,7 +18,9 @@ var (
 	ErrNotConnected = errors.New("not connected to the server")
 	// ErrPublishTimeout is returned when the client did not succeed to publish a message after the configured
 	// publish timeout duration.
-	ErrPublishTimeout = errors.New("publish timeout")
+	ErrPublishTimeout    = errors.New("publish timeout")
+	ErrEmptyConsumerName = errors.New("consumer name should contain at least 1 character")
+	ErrEmptyQueueName    = errors.New("queue name should contain at least 1 character")
 )
 
 var (
@@ -210,9 +212,17 @@ func (c *Client) initChannel(ctx context.Context) error {
 // to stop the delivery.
 //
 // The client must be connected to use this method.
-func (c *Client) Consume(ctx context.Context, consumerName, queue string, opts ...ConsumerOption) (<-chan amqp.Delivery, error) {
+func (c *Client) Consume(ctx context.Context, consumerName, queueName string, opts ...ConsumerOption) (<-chan amqp.Delivery, error) {
 	if !c.isReady.Load() {
 		return nil, ErrNotConnected
+	}
+
+	if consumerName == "" {
+		return nil, ErrEmptyConsumerName
+	}
+
+	if queueName == "" {
+		return nil, ErrEmptyQueueName
 	}
 
 	consumerCfg := DefaultConsumerConfig
@@ -230,7 +240,7 @@ func (c *Client) Consume(ctx context.Context, consumerName, queue string, opts .
 		for {
 			c.logger.Println("Attempting to start a consumer...")
 			msgs, err := c.channel.Consume(
-				consumerCfg.QueueName,
+				queueName,
 				consumerName,
 				consumerCfg.AutoAck,
 				consumerCfg.IsExclusive,

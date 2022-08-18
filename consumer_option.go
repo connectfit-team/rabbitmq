@@ -9,13 +9,6 @@ import (
 // ConsumerOption configures a Consume call.
 type ConsumerOption func(*ConsumerConfig)
 
-// WithConsumedQueueName specifies the name of the queue the consumer will consume from.
-func WithConsumedQueueName(name string) ConsumerOption {
-	return func(cc *ConsumerConfig) {
-		cc.QueueName = name
-	}
-}
-
 // WithConsumerAutoAck determines whether the server expect acknowledgments for messages
 // from the consumer or not.
 // That is, when a message is delivered to the client the server assumes the delivery will succeed and immediately dequeues it.

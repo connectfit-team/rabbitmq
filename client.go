@@ -201,7 +201,7 @@ func (c *Client) initChannel(ctx context.Context) error {
 
 	c.setChannel(ch)
 
-	c.logger.Println("Successfully initialized channel and queue!")
+	c.logger.Println("Successfully initialized channel!")
 
 	c.isReady.Store(true)
 

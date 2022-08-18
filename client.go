@@ -140,10 +140,10 @@ func (c *Client) handleConnection(ctx context.Context) error {
 
 func (c *Client) handleChannel(ctx context.Context) error {
 	for {
-		c.logger.Println("Attempting to initialize the channel and the queue...")
+		c.logger.Println("Attempting to initialize the channel...")
 		err := c.initChannel(ctx)
 		if err != nil {
-			c.logger.Printf("Failed to initialize the channel and the queue: %v\n", err)
+			c.logger.Printf("Failed to initialize the channel: %v\n", err)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -238,7 +238,7 @@ func (c *Client) Consume(ctx context.Context, consumerName, queueName string, op
 
 		var done bool
 		for {
-			c.logger.Println("Attempting to start a consumer...")
+			c.logger.Printf("Attempting consumer from %s...\n", queueName)
 			msgs, err := c.channel.Consume(
 				queueName,
 				consumerName,
@@ -249,7 +249,7 @@ func (c *Client) Consume(ctx context.Context, consumerName, queueName string, op
 				consumerCfg.Arguments,
 			)
 			if err != nil {
-				c.logger.Printf("Could not start to consume the deliveries: %v\n", err)
+				c.logger.Printf("Could not start to consume from %s: %v\n", queueName, err)
 				select {
 				case <-ctx.Done():
 					return
@@ -257,7 +257,7 @@ func (c *Client) Consume(ctx context.Context, consumerName, queueName string, op
 					continue
 				}
 			}
-			c.logger.Println("Successfully started the consumer!")
+			c.logger.Printf("Successfully created consumer %s consuming from %s!\n", consumerName, queueName)
 
 			done = false
 		loop:

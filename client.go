@@ -16,11 +16,15 @@ var (
 	// ErrNotConnect is returned when an operation which requires the client to be connected to the server
 	// is invoked but the client still isn't connected.
 	ErrNotConnected = errors.New("not connected to the server")
+	// ErrAlreadyConnected is returned when trying to connect while the client is already connected to the server.
+	ErrAlreadyConnected = errors.New("already connected to the server")
 	// ErrPublishTimeout is returned when the client did not succeed to publish a message after the configured
 	// publish timeout duration.
-	ErrPublishTimeout    = errors.New("publish timeout")
+	ErrPublishTimeout = errors.New("publish timeout")
+	// ErrEmptyConsumerName is returned when a the length of the given consumer name equals zero.
 	ErrEmptyConsumerName = errors.New("consumer name should contain at least 1 character")
-	ErrEmptyQueueName    = errors.New("queue name should contain at least 1 character")
+	// ErrEmptyQueueName is returned when a the length of the given queue name equals zero.
+	ErrEmptyQueueName = errors.New("queue name should contain at least 1 character")
 )
 
 var (
@@ -80,6 +84,10 @@ func NewClient(logger *log.Logger, opts ...ClientOption) *Client {
 // The caller must as well call the Close() method when he is done with the client in order
 // to avoid memory leaks.
 func (c *Client) Connect(ctx context.Context) error {
+	if c.isReady.Load() {
+		return ErrAlreadyConnected
+	}
+
 	// Inner context of the client's connection lifetime.
 	// Should call the Close method to cancel it.
 	connectionHandlerCtx, cancel := context.WithCancel(context.Background())

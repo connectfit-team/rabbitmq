@@ -1,18 +1,12 @@
 ![RabbitMQ Client](https://upload.wikimedia.org/wikipedia/commons/thumb/7/71/RabbitMQ_logo.svg/2560px-RabbitMQ_logo.svg.png)
 
-</br>
-
 ### RabbitMQ Client provide a simple yet robust abstraction around [the most widely used Go AMQP 0.9.1 client](https://github.com/rabbitmq/amqp091-go). This package has been designed to ease the interactions with the RabbitMQ server and let the developer focus on what really matter.
 
 # ⚙️ Installation
 
-</br>
-
 `go get github.com/connectfit-team/rabbitmq`
 
 # ⚡️ Quickstart
-
-</br>
 
 ### 📖  Publisher
 
@@ -50,7 +44,6 @@ func main() {
 	}
 }
 ```
-
 
 ### 📖  Consumer
 
@@ -99,14 +92,10 @@ func main() {
 
 # 🪄 Features
 
-</br>
-
 * Automatic connection recovery(including channel and consumers recovery)
 * Context handling(gracefully shutdown on context cancellation)
 
 # 📚 Documentation
-
-</br>
 
 For further information you can generates documentation for the project through the [`godoc`](https://pkg.go.dev/golang.org/x/tools/cmd/godoc?utm_source=godoc) command:
 
@@ -115,8 +104,6 @@ For further information you can generates documentation for the project through 
 And then browse the documentation at [`http://localhost:[port]/pkg/github.com/connectfit-team/rabbitmq/`](http://localhost:6060/pkg/github.com/connectfit-team/rabbitmq/)
 
 # 👀 Examples
-
-</br>
 
 ### 📖 Publish a delayed message (using the RabbitMQ delayed message exchange plugin)
 
@@ -172,3 +159,6 @@ func main() {
 ```
 
 # 📝 To Do List
+
+- Channel pooling
+- Add more methods from the procotol

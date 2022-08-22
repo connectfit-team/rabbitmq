@@ -18,7 +18,9 @@ var (
 	ErrNotConnected = errors.New("not connected to the server")
 	// ErrPublishTimeout is returned when the client did not succeed to publish a message after the configured
 	// publish timeout duration.
-	ErrPublishTimeout = errors.New("publish timeout")
+	ErrPublishTimeout    = errors.New("publish timeout")
+	ErrEmptyConsumerName = errors.New("consumer name should contain at least 1 character")
+	ErrEmptyQueueName    = errors.New("queue name should contain at least 1 character")
 )
 
 var (
@@ -138,10 +140,10 @@ func (c *Client) handleConnection(ctx context.Context) error {
 
 func (c *Client) handleChannel(ctx context.Context) error {
 	for {
-		c.logger.Println("Attempting to initialize the channel and the queue...")
+		c.logger.Println("Attempting to initialize the channel...")
 		err := c.initChannel(ctx)
 		if err != nil {
-			c.logger.Printf("Failed to initialize the channel and the queue: %v\n", err)
+			c.logger.Printf("Failed to initialize the channel: %v\n", err)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -199,7 +201,7 @@ func (c *Client) initChannel(ctx context.Context) error {
 
 	c.setChannel(ch)
 
-	c.logger.Println("Successfully initialized channel and queue!")
+	c.logger.Println("Successfully initialized channel!")
 
 	c.isReady.Store(true)
 
@@ -210,9 +212,17 @@ func (c *Client) initChannel(ctx context.Context) error {
 // to stop the delivery.
 //
 // The client must be connected to use this method.
-func (c *Client) Consume(ctx context.Context, queue string, opts ...ConsumerOption) (<-chan amqp.Delivery, error) {
+func (c *Client) Consume(ctx context.Context, consumerName, queueName string, opts ...ConsumerOption) (<-chan amqp.Delivery, error) {
 	if !c.isReady.Load() {
 		return nil, ErrNotConnected
+	}
+
+	if consumerName == "" {
+		return nil, ErrEmptyConsumerName
+	}
+
+	if queueName == "" {
+		return nil, ErrEmptyQueueName
 	}
 
 	consumerCfg := DefaultConsumerConfig
@@ -228,10 +238,10 @@ func (c *Client) Consume(ctx context.Context, queue string, opts ...ConsumerOpti
 
 		var done bool
 		for {
-			c.logger.Println("Attempting to start a consumer...")
+			c.logger.Printf("Attempting consumer from %s...\n", queueName)
 			msgs, err := c.channel.Consume(
-				consumerCfg.QueueName,
-				consumerCfg.Name,
+				queueName,
+				consumerName,
 				consumerCfg.AutoAck,
 				consumerCfg.IsExclusive,
 				consumerCfg.IsNoLocal,
@@ -239,7 +249,7 @@ func (c *Client) Consume(ctx context.Context, queue string, opts ...ConsumerOpti
 				consumerCfg.Arguments,
 			)
 			if err != nil {
-				c.logger.Printf("Could not start to consume the deliveries: %v\n", err)
+				c.logger.Printf("Could not start to consume from %s: %v\n", queueName, err)
 				select {
 				case <-ctx.Done():
 					return
@@ -247,7 +257,7 @@ func (c *Client) Consume(ctx context.Context, queue string, opts ...ConsumerOpti
 					continue
 				}
 			}
-			c.logger.Println("Successfully started the consumer!")
+			c.logger.Printf("Successfully created consumer %s consuming from %s!\n", consumerName, queueName)
 
 			done = false
 		loop:
@@ -256,6 +266,12 @@ func (c *Client) Consume(ctx context.Context, queue string, opts ...ConsumerOpti
 				case <-ctx.Done():
 					if !done {
 						c.logger.Println("Canceling the delivery...")
+						err := c.channel.Cancel(consumerName, consumerCfg.IsNoWait)
+						if err != nil {
+							c.logger.Printf("Could not cancel the consumer: %v\n", err)
+							return
+						}
+
 						done = true
 					}
 				case msg, ok := <-msgs:
@@ -266,6 +282,7 @@ func (c *Client) Consume(ctx context.Context, queue string, opts ...ConsumerOpti
 						}
 						break loop
 					}
+
 					out <- msg
 				}
 			}

@@ -83,7 +83,7 @@ func main() {
 		panic(err)
 	}
 
-	msgs, err := c.Consume(ctx, queue.Name)
+	msgs, err := c.Consume(ctx, "user-event-consumer", queue.Name)
 	if err != nil {
 		panic(err)
 	}

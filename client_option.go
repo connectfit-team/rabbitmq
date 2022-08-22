@@ -69,7 +69,7 @@ func WithConnectionRetryDelay(delay time.Duration) ClientOption {
 }
 
 // WithChannelInitializationRetryDelay configures the delay used by the client between each
-// initialization(channel and queue declaration).
+// initialization(channel declaration).
 func WithChannelInitializationRetryDelay(delay time.Duration) ClientOption {
 	return func(cc *ClientConfig) {
 		cc.ChannelConfig.InitializationRetryDelay = delay

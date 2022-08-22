@@ -1,4 +1,4 @@
-module bitbucket.org/connectfit/rabbitmq
+module github.com/connectfit-team/rabbitmq
 
 go 1.18
 

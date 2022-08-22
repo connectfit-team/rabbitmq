@@ -8,7 +8,7 @@
 
 </br>
 
-`go get bitbucket.org/connectfit/rabbitmq`
+`go get github.com/connectfit-team/rabbitmq`
 
 # ⚡️ Quickstart
 
@@ -24,7 +24,7 @@ import (
 	"log"
 	"os"
 
-	"bitbucket.org/connectfit/rabbitmq"
+	"github.com/connectfit-team/rabbitmq"
 	"github.com/rabbitmq/amqp091-go"
 )
 
@@ -63,7 +63,7 @@ import (
 	"log"
 	"os"
 
-	"bitbucket.org/connectfit/rabbitmq"
+	"github.com/connectfit-team/rabbitmq"
 )
 
 func main() {
@@ -112,7 +112,7 @@ For further information you can generates documentation for the project through 
 
 ```godoc -http=:[port]```
 
-And then browse the documentation at [`http://localhost:[port]/pkg/bitbucket.org/connectfit/rabbitmq/`](http://localhost:6060/pkg/bitbucket.org/connectfit/rabbitmq/)
+And then browse the documentation at [`http://localhost:[port]/pkg/github.com/connectfit-team/rabbitmq/`](http://localhost:6060/pkg/github.com/connectfit-team/rabbitmq/)
 
 # 👀 Examples
 
@@ -129,7 +129,7 @@ import (
 	"os"
 	"time"
 
-	"bitbucket.org/connectfit/rabbitmq"
+	"github.com/connectfit-team/rabbitmq"
 	"github.com/rabbitmq/amqp091-go"
 )
 

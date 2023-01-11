@@ -61,7 +61,7 @@ func WithConnectionTimeout(timeout time.Duration) ClientOption {
 	}
 }
 
-// WithConnectRetryDelay configures the delay used by the client between each connection retry.
+// WithConnectionRetryDelay configures the delay used by the client between each connection retry.
 func WithConnectionRetryDelay(delay time.Duration) ClientOption {
 	return func(cc *ClientConfig) {
 		cc.ConnectionConfig.RetryDelay = delay

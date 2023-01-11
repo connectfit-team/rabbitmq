@@ -21,7 +21,7 @@ func WithQueueName(name string) QueueOption {
 	}
 }
 
-// WithQueue determines whether queue is durable or not.
+// WithQueueDurable determines whether queue is durable or not.
 // If true, the queue will be marked as durable. Durable queues remain active when a server restarts.
 // Non-durable exchanges (transient exchanges) are purged if/when a server restarts.
 // Note that durable queues do not necessarily hold persistent messages,
@@ -60,7 +60,7 @@ func WithQueueArguments(args amqp.Table) QueueOption {
 }
 
 // WithQueueArgument sets an optional argument of the queue declaration.
-func WithQueueArgument(key, value string) QueueOption {
+func WithQueueArgument(key string, value interface{}) QueueOption {
 	return func(qc *QueueConfig) {
 		if qc.Arguments == nil {
 			qc.Arguments = make(amqp.Table)
@@ -74,7 +74,7 @@ func WithQueueDeadLetterExchange(name string) QueueOption {
 	return WithQueueArgument(DeadLetterExchangeNameArgument, name)
 }
 
-// WithConsumerQueueDeadLetterRoutingKey specifies the routing key used to publish the message
+// WithQueueDeadLetterRoutingKey specifies the routing key used to publish the message
 // to the dead letter exchange.
 func WithQueueDeadLetterRoutingKey(key string) QueueOption {
 	return WithQueueArgument(DeadLetterRoutingKeyArgument, key)
@@ -83,4 +83,11 @@ func WithQueueDeadLetterRoutingKey(key string) QueueOption {
 // WithQueueQuorum sets the queue type as "Quorum queue".
 func WithQueueQuorum() QueueOption {
 	return WithQueueArgument(QueueTypeArgument, QuorumQueueType)
+}
+
+// WithRedeliveryLimit sets the redelivery-count's limit
+// msg's actual consume count is always 1 greater than redelivery limit
+// because the first consumption is not counted as redelivery-count
+func WithRedeliveryLimit(limit int64) QueueOption {
+	return WithQueueArgument(QueueRedeliveryLimit, limit)
 }

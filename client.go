@@ -435,6 +435,32 @@ func (c *Client) Close() error {
 	return nil
 }
 
+// DiscardOnCount gets msg and count. Check msg's x-delivery-count from headers.
+// Compare count and x-delivery-count to decide whether redeliver or discard.
+// https://www.rabbitmq.com/quorum-queues.html#poison-message-handling
+func (c *Client) DiscardOnCount(msg amqp.Delivery, count int64) error {
+	// discard
+	if count == 0 {
+		return msg.Ack(false)
+	}
+	val, ok := msg.Headers["x-delivery-count"]
+	// x-delivery-count not exist, requeue
+	if !ok {
+		return msg.Nack(false, true)
+	}
+	intVal, ok := val.(int64)
+	// x-delivery-count is not type int, discard
+	if !ok {
+		return msg.Ack(false)
+	}
+	// if redelivered count exceeds allow count, discard
+	if intVal >= count {
+		return msg.Ack(false)
+	}
+	// else requeue msg
+	return msg.Nack(false, true)
+}
+
 func (c *Client) setConnection(connection *amqp.Connection) {
 	c.connection = connection
 

@@ -85,9 +85,9 @@ func WithQueueQuorum() QueueOption {
 	return WithQueueArgument(QueueTypeArgument, QuorumQueueType)
 }
 
-// WithRedeliveryLimit sets the redelivery-count's limit
+// WithDeliveryLimit sets the redelivery-count's limit
 // msg's actual consume count is always 1 greater than redelivery limit
 // because the first consumption is not counted as redelivery-count
-func WithRedeliveryLimit(limit int64) QueueOption {
-	return WithQueueArgument(QueueRedeliveryLimit, limit)
+func WithDeliveryLimit(limit int64) QueueOption {
+	return WithQueueArgument(QueueDeliveryLimit, limit)
 }

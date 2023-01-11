@@ -224,14 +224,20 @@ const (
 	// QueueTypeArgument is the key used in the queue optional arguments to specify
 	// the queue type.
 	QueueTypeArgument = "x-queue-type"
-	// QueueRedeliveryLimit is queue optional arguments to limit
+	// QueueDeliveryLimit is queue optional arguments to limit
 	// redelivery count('x-delivery-count') of unacked message
 	// https://www.rabbitmq.com/quorum-queues.html#configuration
-	QueueRedeliveryLimit = "x-delivery-limit"
+	QueueDeliveryLimit = "x-delivery-limit"
 )
 
 const (
 	// QuorumQueueType is the value used with the key "x-queue-type" in the optional
 	// arguments when declaring a queue to declare a Quorum queue.
 	QuorumQueueType = "quorum"
+)
+
+const (
+	// MessageDeliveryCount in message's header represent how many times
+	// the message was redelivered.
+	MessageDeliveryCount = "x-delivery-count"
 )

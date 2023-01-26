@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -33,11 +32,16 @@ var (
 	errConnectionTimeout = errors.New("connection timeout")
 )
 
+type Logger interface {
+	Println(v ...any)
+	Printf(format string, v ...any)
+}
+
 // Client is a reliable wrapper around an AMQP connection which automatically recover
 // from connection errors.
 type Client struct {
 	config          ClientConfig
-	logger          *log.Logger // TODO: Look for another logger
+	logger          Logger // TODO: Look for another logger
 	connection      *amqp.Connection
 	channel         *amqp.Channel
 	isReady         atomic.Bool
@@ -49,7 +53,7 @@ type Client struct {
 }
 
 // NewClient creates a new client instance.
-func NewClient(logger *log.Logger, opts ...ClientOption) *Client {
+func NewClient(logger Logger, opts ...ClientOption) *Client {
 	cfg := ClientConfig{
 		ConnectionConfig: DefaultConnectionConfig,
 		ChannelConfig:    DefaultChannelConfig,

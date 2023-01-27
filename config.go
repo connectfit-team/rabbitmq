@@ -4,12 +4,14 @@ import (
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"golang.org/x/exp/slog"
 )
 
 // ClientConfig represents the configuration of a client instance.
 type ClientConfig struct {
 	ConnectionConfig ConnectionConfig
 	ChannelConfig    ChannelConfig
+	Logger           *slog.Logger
 }
 
 // ConnectionConfig contains all the configurable parameters used by a client instance

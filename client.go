@@ -9,6 +9,7 @@ import (
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"golang.org/x/exp/slog"
 )
 
 var (
@@ -32,16 +33,11 @@ var (
 	errConnectionTimeout = errors.New("connection timeout")
 )
 
-type Logger interface {
-	Println(v ...any)
-	Printf(format string, v ...any)
-}
-
 // Client is a reliable wrapper around an AMQP connection which automatically recover
 // from connection errors.
 type Client struct {
 	config          ClientConfig
-	logger          Logger // TODO: Look for another logger
+	logger          *slog.Logger
 	connection      *amqp.Connection
 	channel         *amqp.Channel
 	isReady         atomic.Bool
@@ -53,10 +49,11 @@ type Client struct {
 }
 
 // NewClient creates a new client instance.
-func NewClient(logger Logger, opts ...ClientOption) *Client {
+func NewClient(opts ...ClientOption) *Client {
 	cfg := ClientConfig{
 		ConnectionConfig: DefaultConnectionConfig,
 		ChannelConfig:    DefaultChannelConfig,
+		Logger:           slog.Default(),
 	}
 
 	for _, opt := range opts {
@@ -76,7 +73,7 @@ func NewClient(logger Logger, opts ...ClientOption) *Client {
 	}
 
 	return &Client{
-		logger: logger,
+		logger: cfg.Logger,
 		config: cfg,
 	}
 }
@@ -102,7 +99,7 @@ func (c *Client) Connect(ctx context.Context) error {
 
 		err := c.handleConnection(connectionHandlerCtx)
 		if err != nil {
-			c.logger.Printf("Connection lost: %v\n", err)
+			c.logger.Error("Connection lost", err)
 		}
 	}()
 
@@ -124,10 +121,11 @@ func (c *Client) Connect(ctx context.Context) error {
 func (c *Client) handleConnection(ctx context.Context) error {
 	timeout := time.After(c.config.ConnectionConfig.Timeout)
 	for {
-		c.logger.Println("Attempting to connect to the server...")
+		c.logger.Info("Attempting to connect to the server...")
+
 		err := c.connect(ctx)
 		if err != nil {
-			c.logger.Printf("Connection attempt failed: %v\n", err)
+			c.logger.Error("Connection attempt failed", err)
 			select {
 			case <-timeout:
 				return errConnectionTimeout
@@ -137,7 +135,7 @@ func (c *Client) handleConnection(ctx context.Context) error {
 				continue
 			}
 		}
-		c.logger.Println("Succesfully connected!")
+		c.logger.Info("Succesfully connected!")
 
 		err = c.handleChannel(ctx)
 		if err != nil {
@@ -152,15 +150,16 @@ func (c *Client) handleConnection(ctx context.Context) error {
 
 func (c *Client) handleChannel(ctx context.Context) error {
 	for {
-		c.logger.Println("Attempting to initialize the channel...")
+		c.logger.Info("Attempting to initialize the channel...")
+
 		err := c.initChannel(ctx)
 		if err != nil {
-			c.logger.Printf("Failed to initialize the channel: %v\n", err)
+			c.logger.Error("Failed to initialize the channel", err)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case err = <-c.notifyConnClose:
-				c.logger.Printf("Connection closed: %v\n", err)
+				c.logger.Error("Connection closed", err)
 				return nil
 			case <-time.After(c.config.ChannelConfig.InitializationRetryDelay):
 				continue
@@ -171,10 +170,10 @@ func (c *Client) handleChannel(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case err = <-c.notifyConnClose:
-			c.logger.Printf("Connection closed: %v\n", err)
+			c.logger.Error("Connection closed", err)
 			return nil
 		case err := <-c.notifyChanClose:
-			c.logger.Printf("Channel closed: %v\n", err)
+			c.logger.Error("Channel closed", err)
 		}
 
 		c.isReady.Store(false)
@@ -182,7 +181,10 @@ func (c *Client) handleChannel(ctx context.Context) error {
 }
 
 func (c *Client) connect(ctx context.Context) error {
-	c.logger.Printf("Attempting to connect to %s\n", c.config.ConnectionConfig.URL)
+	c.logger.Info("Attempting to connect to the broker",
+		"broker_url", c.config.ConnectionConfig.URL,
+	)
+
 	conn, err := amqp.Dial(c.config.ConnectionConfig.URL)
 	if err != nil {
 		return err
@@ -213,7 +215,7 @@ func (c *Client) initChannel(ctx context.Context) error {
 
 	c.setChannel(ch)
 
-	c.logger.Println("Successfully initialized channel!")
+	c.logger.Info("Successfully initialized channel!")
 
 	c.isReady.Store(true)
 
@@ -250,7 +252,10 @@ func (c *Client) Consume(ctx context.Context, consumerName, queueName string, op
 
 		var done bool
 		for {
-			c.logger.Printf("Attempting consumer from %s...\n", queueName)
+			c.logger.Info("Starting consumer",
+				"queue_name", queueName,
+			)
+
 			msgs, err := c.channel.Consume(
 				queueName,
 				consumerName,
@@ -261,7 +266,9 @@ func (c *Client) Consume(ctx context.Context, consumerName, queueName string, op
 				consumerCfg.Arguments,
 			)
 			if err != nil {
-				c.logger.Printf("Could not start to consume from %s: %v\n", queueName, err)
+				c.logger.Error("Failed to start the consumer", err,
+					"queue_name", queueName,
+				)
 				select {
 				case <-ctx.Done():
 					return
@@ -269,7 +276,10 @@ func (c *Client) Consume(ctx context.Context, consumerName, queueName string, op
 					continue
 				}
 			}
-			c.logger.Printf("Successfully created consumer %s consuming from %s!\n", consumerName, queueName)
+			c.logger.Info("Consumer successfully started!",
+				"consumer_name", consumerName,
+				"queue_name", queueName,
+			)
 
 			done = false
 		loop:
@@ -277,10 +287,13 @@ func (c *Client) Consume(ctx context.Context, consumerName, queueName string, op
 				select {
 				case <-ctx.Done():
 					if !done {
-						c.logger.Println("Canceling the delivery...")
+						c.logger.Info("Canceling the delivery...")
+
 						err := c.channel.Cancel(consumerName, consumerCfg.IsNoWait)
 						if err != nil {
-							c.logger.Printf("Could not cancel the consumer: %v\n", err)
+							c.logger.Error("Failed to cancel the delivery", err,
+								"consumer_name", consumerName,
+							)
 							return
 						}
 
@@ -288,7 +301,8 @@ func (c *Client) Consume(ctx context.Context, consumerName, queueName string, op
 					}
 				case msg, ok := <-msgs:
 					if !ok {
-						c.logger.Println("Consumed all remaining messages!")
+						c.logger.Info("Consumed all remaining messages!")
+
 						if done {
 							return
 						}
@@ -335,7 +349,9 @@ func (c *Client) Publish(ctx context.Context, msg amqp.Publishing, routingKey st
 			msg,
 		)
 		if err != nil {
-			c.logger.Printf("Failed to publish the message: %v\n", err)
+			c.logger.Error("Failed to publish the message", err,
+				"routing_key", routingKey,
+			)
 			select {
 			case <-timeout:
 				return ErrPublishTimeout
@@ -414,7 +430,7 @@ func (c *Client) QueueBind(queue, exchange, routingKey string) error {
 // It will stop the background job handling the client's connection and close both the
 // AMQP channel and connection.
 func (c *Client) Close() error {
-	c.logger.Println("Closing the client...")
+	c.logger.Info("Closing the client...")
 	// Cancel the context of the background connection handler.
 	c.cancel()
 	c.wg.Wait()
@@ -435,7 +451,7 @@ func (c *Client) Close() error {
 
 	c.isReady.Store(false)
 
-	c.logger.Println("Successfully closed the client.")
+	c.logger.Info("Successfully closed the client.")
 	return nil
 }
 

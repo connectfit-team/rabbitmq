@@ -1,9 +1,19 @@
 package rabbitmq
 
-import "time"
+import (
+	"time"
+
+	"golang.org/x/exp/slog"
+)
 
 // ClientOption are options used to configure the client.
 type ClientOption func(*ClientConfig)
+
+func WithLogger(logger *slog.Logger) ClientOption {
+	return func(cc *ClientConfig) {
+		cc.Logger = logger
+	}
+}
 
 // WithURL configures the URL the client will use to dial with the server.
 // If this option is used, username, password, host and virtual host options

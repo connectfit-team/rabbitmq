@@ -455,6 +455,10 @@ func (c *Client) Close() error {
 	return nil
 }
 
+func (c *Client) IsReady() bool {
+	return c.isReady.Load()
+}
+
 func (c *Client) setConnection(connection *amqp.Connection) {
 	c.connection = connection
 

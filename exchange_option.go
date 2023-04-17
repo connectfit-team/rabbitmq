@@ -30,7 +30,7 @@ func WithExchangeType(exchangeType ExchangeType) ExchangeOption {
 // Non-durable exchanges (transient exchanges) are purged if/when a server restarts.
 func WithExchangeDurable(durable bool) ExchangeOption {
 	return func(ec *ExchangeConfig) {
-		ec.IsDurable = durable
+		ec.Durable = durable
 	}
 }
 
@@ -38,7 +38,7 @@ func WithExchangeDurable(durable bool) ExchangeOption {
 // all queues have finished using it or not.
 func WithExchangeAutoDelete(autoDelete bool) ExchangeOption {
 	return func(ec *ExchangeConfig) {
-		ec.IsAutoDelete = autoDelete
+		ec.AutoDelete = autoDelete
 	}
 }
 
@@ -47,7 +47,7 @@ func WithExchangeAutoDelete(autoDelete bool) ExchangeOption {
 // wiring that is not visible to applications.
 func WithExchangeInternal(internal bool) ExchangeOption {
 	return func(ec *ExchangeConfig) {
-		ec.IsInternal = internal
+		ec.Internal = internal
 	}
 }
 
@@ -57,7 +57,7 @@ func WithExchangeInternal(internal bool) ExchangeOption {
 // the method it will raise a channel or connection exception.
 func WithExchangeNoWait(noWait bool) ExchangeOption {
 	return func(ec *ExchangeConfig) {
-		ec.IsNoWait = noWait
+		ec.NoWait = noWait
 	}
 }
 

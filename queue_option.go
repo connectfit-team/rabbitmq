@@ -28,7 +28,7 @@ func WithQueueName(name string) QueueOption {
 // although it does not make sense to send persistent messages to a transient queue.
 func WithQueueDurable(durable bool) QueueOption {
 	return func(qc *QueueConfig) {
-		qc.IsDurable = durable
+		qc.Durable = durable
 	}
 }
 
@@ -36,7 +36,7 @@ func WithQueueDurable(durable bool) QueueOption {
 // Exclusive queues may only be accessed by the current connection, and are deleted when that connection closes.
 func WithQueueExclusive(exclusive bool) QueueOption {
 	return func(qc *QueueConfig) {
-		qc.IsExclusive = exclusive
+		qc.Exclusive = exclusive
 	}
 }
 

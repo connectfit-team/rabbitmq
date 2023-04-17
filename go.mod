@@ -1,8 +1,8 @@
 module github.com/connectfit-team/rabbitmq
 
-go 1.18
+go 1.20
 
 require (
-	github.com/rabbitmq/amqp091-go v1.6.0
-	golang.org/x/exp v0.0.0-20230126173853-a67bb567ff2e
+	github.com/rabbitmq/amqp091-go v1.8.0
+	golang.org/x/exp v0.0.0-20230321023759-10a507213a29
 )

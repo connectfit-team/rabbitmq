@@ -51,7 +51,7 @@ var DefaultConnectionConfig = ConnectionConfig{
 type ChannelConfig struct {
 	PrefetchCount            int
 	PrefetchSize             int
-	IsGlobal                 bool
+	Global                   bool
 	InitializationRetryDelay time.Duration
 }
 
@@ -68,7 +68,7 @@ const (
 var DefaultChannelConfig = ChannelConfig{
 	PrefetchCount:            DefaultPrefetchCount,
 	PrefetchSize:             0,
-	IsGlobal:                 false,
+	Global:                   false,
 	InitializationRetryDelay: DefaultChannelInitializationRetryDelay,
 }
 
@@ -77,8 +77,8 @@ var DefaultChannelConfig = ChannelConfig{
 type PublishConfig struct {
 	ExchangeName   string
 	RoutingKey     string
-	IsMandatory    bool
-	IsImmediate    bool
+	Mandatory      bool
+	Immediate      bool
 	TTL            string // TTL is applied on a message-by-message basis and is represented in millisecond.
 	MessageHeaders amqp.Table
 	RetryDelay     time.Duration
@@ -98,8 +98,8 @@ const (
 var DefaultPublishConfig = PublishConfig{
 	ExchangeName:   "", // Default exchange
 	RoutingKey:     "",
-	IsMandatory:    false,
-	IsImmediate:    false,
+	Mandatory:      false,
+	Immediate:      false,
 	TTL:            "",
 	MessageHeaders: nil,
 	RetryDelay:     DefaultPublishRetryDelay,
@@ -112,9 +112,9 @@ type ConsumerConfig struct {
 	QueueName                string
 	Name                     string
 	AutoAck                  bool
-	IsExclusive              bool
-	IsNoWait                 bool
-	IsNoLocal                bool
+	Exclusive                bool
+	NoWait                   bool
+	NoLocal                  bool
 	InitializationRetryDelay time.Duration
 	Arguments                amqp.Table
 }
@@ -128,9 +128,9 @@ const (
 var DefaultConsumerConfig = ConsumerConfig{
 	QueueName:                "",
 	AutoAck:                  false,
-	IsExclusive:              false,
-	IsNoWait:                 false,
-	IsNoLocal:                false,
+	Exclusive:                false,
+	NoWait:                   false,
+	NoLocal:                  false,
 	InitializationRetryDelay: DefaultConsumerInitializationRetryDelay,
 	Arguments:                nil,
 }
@@ -174,23 +174,23 @@ const (
 // ExchangeConfig contains all the configurable parameters used by a client instance
 // to declare an exchange.
 type ExchangeConfig struct {
-	Name         string
-	Type         ExchangeType
-	IsDurable    bool
-	IsAutoDelete bool
-	IsInternal   bool
-	IsNoWait     bool
-	Arguments    amqp.Table
+	Name       string
+	Type       ExchangeType
+	Durable    bool
+	AutoDelete bool
+	Internal   bool
+	NoWait     bool
+	Arguments  amqp.Table
 }
 
 // DefaultExchangeConfig is the default configuration used by a client instance to declare exchanges.
 var DefaultExchangeConfig = ExchangeConfig{
-	Name:         "", // Default exchange
-	Type:         DirectExchangeType,
-	IsDurable:    true,
-	IsAutoDelete: false,
-	IsInternal:   false,
-	IsNoWait:     false,
+	Name:       "", // Default exchange
+	Type:       DirectExchangeType,
+	Durable:    true,
+	AutoDelete: false,
+	Internal:   false,
+	NoWait:     false,
 }
 
 // QueueConfig contains all the configurable parameters used by a client instance to declare a

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,11 +15,9 @@ import (
 )
 
 var (
-	// ErrNotConnect is returned when an operation which requires the client to be connected to the server
+	// ErrNotConnected is returned when an operation which requires the client to be connected to the server
 	// is invoked but the client still isn't connected.
 	ErrNotConnected = errors.New("not connected to the server")
-	// ErrAlreadyConnected is returned when trying to connect while the client is already connected to the server.
-	ErrAlreadyConnected = errors.New("already connected to the server")
 	// ErrPublishTimeout is returned when the client did not succeed to publish a message after the configured
 	// publish timeout duration.
 	ErrPublishTimeout = errors.New("publish timeout")
@@ -36,11 +36,13 @@ var (
 // Client is a reliable wrapper around an AMQP connection which automatically recover
 // from connection errors.
 type Client struct {
+	// has unexported fields
 	config          ClientConfig
 	logger          *slog.Logger
 	connection      *amqp.Connection
 	channel         *amqp.Channel
-	isReady         atomic.Bool
+	isConnected     atomic.Bool
+	notifyConnState chan ConnStateNotification
 	notifyConnClose chan *amqp.Error
 	notifyChanClose chan *amqp.Error
 	notifyPublish   chan amqp.Confirmation
@@ -48,7 +50,7 @@ type Client struct {
 	wg              sync.WaitGroup
 }
 
-// NewClient creates a new client instance.
+// NewClient creates a new client instance with the given options.
 func NewClient(opts ...ClientOption) *Client {
 	cfg := ClientConfig{
 		ConnectionConfig: DefaultConnectionConfig,
@@ -61,15 +63,15 @@ func NewClient(opts ...ClientOption) *Client {
 	}
 
 	// Format the URL if no URL provided through the options.
+	// See https://www.rabbitmq.com/uri-spec.html
 	if cfg.ConnectionConfig.URL == "" {
-		cfg.ConnectionConfig.URL = fmt.Sprintf(
-			"amqp://%s:%s@%s:%s/%s",
-			cfg.ConnectionConfig.Username,
-			cfg.ConnectionConfig.Password,
-			cfg.ConnectionConfig.Host,
-			cfg.ConnectionConfig.Port,
-			cfg.ConnectionConfig.VirtualHost,
-		)
+		u := &url.URL{
+			Scheme: "amqp",
+			User:   url.UserPassword(cfg.ConnectionConfig.Username, cfg.ConnectionConfig.Password),
+			Host:   net.JoinHostPort(cfg.ConnectionConfig.Host, cfg.ConnectionConfig.Port),
+			Path:   cfg.ConnectionConfig.VirtualHost,
+		}
+		cfg.ConnectionConfig.URL = u.String()
 	}
 
 	return &Client{
@@ -78,111 +80,101 @@ func NewClient(opts ...ClientOption) *Client {
 	}
 }
 
-// Connect starts a job which will asynchronously try to connect to the server at the given URL
-// and recover from future connection errors. A call to this method will block until the first
-// successful connection.
+// ConnStateNotification represents a notification sent by the client when the
+// connection state changes.
+// If the connection is lost, the Err field will contain the error which caused
+// the connection to be lost.
+type ConnStateNotification struct {
+	// Connected is true if the client is connected to the server.
+	Connected bool
+	// Err contains the error which caused the connection to be lost.
+	Err error
+}
+
+// Connect starts a background job which will try to connect to the broker
+// and recover from connection errors. The returned channel will be notified
+// when the connection state changes.
 //
-// The caller must as well call the Close() method when he is done with the client in order
-// to avoid memory leaks.
-func (c *Client) Connect(ctx context.Context) error {
-	if c.isReady.Load() {
-		return ErrAlreadyConnected
+// If you want a blocking behavior, you can use the following pattern:
+//
+//	c := rabbitmq.NewClient()
+//	notifyConnState := c.Connect()
+//	if cs := <-notifyConnState && cs.Err != nil {
+//	  // handle error
+//	}
+//	defer c.Close()
+//
+// If you want a non-blocking behavior, you can use the following pattern:
+//
+//	c := rabbitmq.NewClient()
+//	notifyConnState := c.Connect()
+//	defer c.Close()
+//	go func() {
+//	  for cs := range notifyConnState {
+//	    // handle connection state change
+//	  }
+//	}()
+//
+// Timeout and retry delay are configurable through the ClientConfig.
+//
+// The caller must call Close() when the client is no longer needed to
+// release the resources.
+func (c *Client) Connect() <-chan ConnStateNotification {
+	c.notifyConnState = make(chan ConnStateNotification, 1)
+
+	if c.IsConnected() {
+		c.notifyConnState <- ConnStateNotification{Connected: true}
+		return c.notifyConnState
 	}
 
-	// Inner context of the client's connection lifetime.
-	// Should call the Close method to cancel it.
 	connectionHandlerCtx, cancel := context.WithCancel(context.Background())
 	c.cancel = cancel
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
 
+		c.logger.Debug("Starting connection handler")
 		err := c.handleConnection(connectionHandlerCtx)
 		if err != nil {
-			c.logger.Error("Connection lost", err)
+			c.notifyConnState <- ConnStateNotification{
+				Connected: false,
+				Err:       fmt.Errorf("disconnected: %w", err),
+			}
 		}
 	}()
 
-	for {
-		select {
-		case <-ctx.Done():
-			cancel()
-			c.wg.Wait()
-			return ctx.Err()
-		default:
-			// TODO: Might check for a cleaner way to do this.
-			if c.isReady.Load() {
-				return nil
-			}
-		}
-	}
+	return c.notifyConnState
 }
 
 func (c *Client) handleConnection(ctx context.Context) error {
 	timeout := time.After(c.config.ConnectionConfig.Timeout)
 	for {
-		c.logger.Info("Attempting to connect to the server...")
-
-		err := c.connect(ctx)
+		err := c.connect()
 		if err != nil {
-			c.logger.Error("Connection attempt failed", err)
+			c.logger.Error("Connection attempt failed", slog.Any("err", err))
 			select {
+			case <-ctx.Done():
+				c.logger.Debug("[handleConnection] Context canceled")
+				return ctx.Err()
 			case <-timeout:
 				return errConnectionTimeout
-			case <-ctx.Done():
-				return ctx.Err()
 			case <-time.After(c.config.ConnectionConfig.RetryDelay):
 				continue
 			}
 		}
-		c.logger.Info("Succesfully connected!")
 
 		err = c.handleChannel(ctx)
 		if err != nil {
 			return err
 		}
 
-		c.isReady.Store(false)
-
 		timeout = time.After(c.config.ConnectionConfig.Timeout)
 	}
 }
 
-func (c *Client) handleChannel(ctx context.Context) error {
-	for {
-		c.logger.Info("Attempting to initialize the channel...")
-
-		err := c.initChannel(ctx)
-		if err != nil {
-			c.logger.Error("Failed to initialize the channel", err)
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case err = <-c.notifyConnClose:
-				c.logger.Error("Connection closed", err)
-				return nil
-			case <-time.After(c.config.ChannelConfig.InitializationRetryDelay):
-				continue
-			}
-		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case err = <-c.notifyConnClose:
-			c.logger.Error("Connection closed", err)
-			return nil
-		case err := <-c.notifyChanClose:
-			c.logger.Error("Channel closed", err)
-		}
-
-		c.isReady.Store(false)
-	}
-}
-
-func (c *Client) connect(ctx context.Context) error {
-	c.logger.Info("Attempting to connect to the broker",
-		"broker_url", c.config.ConnectionConfig.URL,
+func (c *Client) connect() error {
+	c.logger.Debug("Attempting to connect to the broker",
+		slog.String("broker_url", c.config.ConnectionConfig.URL),
 	)
 
 	conn, err := amqp.Dial(c.config.ConnectionConfig.URL)
@@ -190,10 +182,56 @@ func (c *Client) connect(ctx context.Context) error {
 		return err
 	}
 	c.setConnection(conn)
+
+	c.logger.Debug("Successfully connected to the broker!")
 	return nil
 }
 
-func (c *Client) initChannel(ctx context.Context) error {
+func (c *Client) handleChannel(ctx context.Context) error {
+	for {
+		err := c.initChannel()
+		if err != nil {
+			c.logger.Error("Failed to initialize the channel", slog.Any("err", err))
+			select {
+			case <-ctx.Done():
+				c.logger.Debug("[handleChannel] Context canceled")
+				return ctx.Err()
+			case err = <-c.notifyConnClose:
+				c.logger.Error("Connection closed", slog.Any("err", err))
+				return nil
+			case <-time.After(c.config.ChannelConfig.InitializationRetryDelay):
+				continue
+			}
+		}
+
+		c.notifyConnState <- ConnStateNotification{Connected: true}
+		c.isConnected.Store(true)
+
+		c.logger.Debug("Successfully initialized the AMQP channel")
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case err = <-c.notifyConnClose:
+			c.notifyConnState <- ConnStateNotification{
+				Connected: false,
+				Err:       fmt.Errorf("connection closed: %w", err),
+			}
+			return nil
+		case err = <-c.notifyChanClose:
+			c.notifyConnState <- ConnStateNotification{
+				Connected: false,
+				Err:       fmt.Errorf("channel closed: %w", err),
+			}
+		}
+
+		c.isConnected.Store(false)
+	}
+}
+
+func (c *Client) initChannel() error {
+	c.logger.Debug("Attempting to initialize the AMQP channel")
+
 	ch, err := c.connection.Channel()
 	if err != nil {
 		return err
@@ -207,17 +245,13 @@ func (c *Client) initChannel(ctx context.Context) error {
 	err = ch.Qos(
 		c.config.ChannelConfig.PrefetchCount,
 		c.config.ChannelConfig.PrefetchSize,
-		c.config.ChannelConfig.IsGlobal,
+		c.config.ChannelConfig.Global,
 	)
 	if err != nil {
 		return err
 	}
 
 	c.setChannel(ch)
-
-	c.logger.Info("Successfully initialized channel!")
-
-	c.isReady.Store(true)
 
 	return nil
 }
@@ -227,7 +261,7 @@ func (c *Client) initChannel(ctx context.Context) error {
 //
 // The client must be connected to use this method.
 func (c *Client) Consume(ctx context.Context, consumerName, queueName string, opts ...ConsumerOption) (<-chan amqp.Delivery, error) {
-	if !c.isReady.Load() {
+	if !c.IsConnected() {
 		return nil, ErrNotConnected
 	}
 
@@ -252,22 +286,23 @@ func (c *Client) Consume(ctx context.Context, consumerName, queueName string, op
 
 		var done bool
 		for {
-			c.logger.Info("Starting consumer",
-				"queue_name", queueName,
+			c.logger.Debug("Starting consumer",
+				slog.String("queue_name", queueName),
 			)
 
 			msgs, err := c.channel.Consume(
 				queueName,
 				consumerName,
 				consumerCfg.AutoAck,
-				consumerCfg.IsExclusive,
-				consumerCfg.IsNoLocal,
-				consumerCfg.IsNoWait,
+				consumerCfg.Exclusive,
+				consumerCfg.NoLocal,
+				consumerCfg.NoWait,
 				consumerCfg.Arguments,
 			)
 			if err != nil {
-				c.logger.Error("Failed to start the consumer", err,
-					"queue_name", queueName,
+				c.logger.Error("Failed to start the consumer",
+					slog.Any("err", err),
+					slog.String("queue_name", queueName),
 				)
 				select {
 				case <-ctx.Done():
@@ -276,23 +311,26 @@ func (c *Client) Consume(ctx context.Context, consumerName, queueName string, op
 					continue
 				}
 			}
-			c.logger.Info("Consumer successfully started!",
-				"consumer_name", consumerName,
-				"queue_name", queueName,
+			c.logger.Debug("Consumer successfully started",
+				slog.String("consumer_name", consumerName),
+				slog.String("queue_name", queueName),
 			)
 
 			done = false
+
+			// TODO: Check if the delivered message are all consumed.
 		loop:
 			for {
 				select {
 				case <-ctx.Done():
 					if !done {
-						c.logger.Info("Canceling the delivery...")
+						c.logger.Debug("Canceling the delivery")
 
-						err := c.channel.Cancel(consumerName, consumerCfg.IsNoWait)
+						err := c.channel.Cancel(consumerName, consumerCfg.NoWait)
 						if err != nil {
-							c.logger.Error("Failed to cancel the delivery", err,
-								"consumer_name", consumerName,
+							c.logger.Error("Failed to cancel the delivery",
+								slog.Any("err", err),
+								slog.String("consumer_name", consumerName),
 							)
 							return
 						}
@@ -301,7 +339,7 @@ func (c *Client) Consume(ctx context.Context, consumerName, queueName string, op
 					}
 				case msg, ok := <-msgs:
 					if !ok {
-						c.logger.Info("Consumed all remaining messages!")
+						c.logger.Debug("Consumed all remaining messages!")
 
 						if done {
 							return
@@ -323,7 +361,7 @@ func (c *Client) Consume(ctx context.Context, consumerName, queueName string, op
 //
 // The client must be connected to use this method.
 func (c *Client) Publish(ctx context.Context, msg amqp.Publishing, routingKey string, opts ...PublishOption) error {
-	if !c.isReady.Load() {
+	if !c.IsConnected() {
 		return ErrNotConnected
 	}
 
@@ -344,13 +382,14 @@ func (c *Client) Publish(ctx context.Context, msg amqp.Publishing, routingKey st
 			ctx,
 			publishCfg.ExchangeName,
 			routingKey,
-			publishCfg.IsMandatory,
-			publishCfg.IsImmediate,
+			publishCfg.Mandatory,
+			publishCfg.Immediate,
 			msg,
 		)
 		if err != nil {
-			c.logger.Error("Failed to publish the message", err,
-				"routing_key", routingKey,
+			c.logger.Error("Failed to publish the message",
+				slog.Any("err", err),
+				slog.String("routing_key", routingKey),
 			)
 			select {
 			case <-timeout:
@@ -373,7 +412,7 @@ func (c *Client) Publish(ctx context.Context, msg amqp.Publishing, routingKey st
 // ExchangeDeclare creates an exchange if it does not already exist, and if the exchange exists,
 // verifies that it is of the correct and expected class.
 func (c *Client) ExchangeDeclare(name string, opts ...ExchangeOption) error {
-	if !c.isReady.Load() {
+	if !c.IsConnected() {
 		return ErrNotConnected
 	}
 
@@ -386,10 +425,10 @@ func (c *Client) ExchangeDeclare(name string, opts ...ExchangeOption) error {
 	return c.channel.ExchangeDeclare(
 		name,
 		exchangeCfg.Type.String(),
-		exchangeCfg.IsDurable,
-		exchangeCfg.IsAutoDelete,
-		exchangeCfg.IsInternal,
-		exchangeCfg.IsNoWait,
+		exchangeCfg.Durable,
+		exchangeCfg.AutoDelete,
+		exchangeCfg.Internal,
+		exchangeCfg.NoWait,
 		exchangeCfg.Arguments,
 	)
 }
@@ -397,7 +436,7 @@ func (c *Client) ExchangeDeclare(name string, opts ...ExchangeOption) error {
 // QueueDeclare creates a queue if it does not already exist, and if the queue exists,
 // verifies that it is of the correct and expected class.
 func (c *Client) QueueDeclare(name string, opts ...QueueOption) (amqp.Queue, error) {
-	if !c.isReady.Load() {
+	if !c.IsConnected() {
 		return amqp.Queue{}, ErrNotConnected
 	}
 
@@ -419,7 +458,7 @@ func (c *Client) QueueDeclare(name string, opts ...QueueOption) (amqp.Queue, err
 
 // QueueBind binds a queue to an exchange.
 func (c *Client) QueueBind(queue, exchange, routingKey string) error {
-	if !c.isReady.Load() {
+	if !c.IsConnected() {
 		return ErrNotConnected
 	}
 
@@ -430,7 +469,12 @@ func (c *Client) QueueBind(queue, exchange, routingKey string) error {
 // It will stop the background job handling the client's connection and close both the
 // AMQP channel and connection.
 func (c *Client) Close() error {
-	c.logger.Info("Closing the client...")
+	if !c.IsConnected() {
+		return ErrNotConnected
+	}
+
+	c.logger.Debug("Closing the client")
+
 	// Cancel the context of the background connection handler.
 	c.cancel()
 	c.wg.Wait()
@@ -449,14 +493,17 @@ func (c *Client) Close() error {
 		}
 	}
 
-	c.isReady.Store(false)
+	c.notifyConnState <- ConnStateNotification{Connected: false}
+	close(c.notifyConnState)
 
-	c.logger.Info("Successfully closed the client.")
+	c.isConnected.Store(false)
+
+	c.logger.Debug("Successfully closed the client")
 	return nil
 }
 
-func (c *Client) IsReady() bool {
-	return c.isReady.Load()
+func (c *Client) IsConnected() bool {
+	return c.isConnected.Load()
 }
 
 func (c *Client) setConnection(connection *amqp.Connection) {

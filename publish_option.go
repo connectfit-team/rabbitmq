@@ -1,6 +1,7 @@
 package rabbitmq
 
 import (
+	"strconv"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -73,4 +74,8 @@ func WithMessageDelay(delay time.Duration) PublishOption {
 	return func(pc *PublishConfig) {
 		WithMessageHeader(DelayMessageHeader, durationToMillisecondsString(delay))(pc)
 	}
+}
+
+func durationToMillisecondsString(duration time.Duration) string {
+	return strconv.FormatInt(duration.Milliseconds(), 10)
 }

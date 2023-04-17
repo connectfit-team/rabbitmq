@@ -1,3 +1,5 @@
-// Package rabbitmq implements a wrapper around an AMQP connection which supports
-// automatic reconnection to the server and automatic reconnection of the consumers.
+// Package rabbitmq implements a wrapper around the [amqp091] package which supports
+// automatic connection and channel recovery.
+//
+// [amqp091]: https://pkg.go.dev/github.com/rabbitmq/amqp091-go
 package rabbitmq

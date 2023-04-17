@@ -19,6 +19,9 @@ var (
 	ErrNotConnected = errors.New("not connected to the server")
 	// ErrAlreadyConnected is returned when trying to connect while the client is already connected to the server.
 	ErrAlreadyConnected = errors.New("already connected to the server")
+	// ErrConnectionTimeout is returned when the client did not succeed to connect to the server after the
+	// configured connection timeout duration.
+	ErrConnectionTimeout = errors.New("connection timeout")
 	// ErrPublishTimeout is returned when the client did not succeed to publish a message after the configured
 	// publish timeout duration.
 	ErrPublishTimeout = errors.New("publish timeout")
@@ -114,7 +117,7 @@ func (c *Client) Connect() error {
 	case <-time.After(c.config.ConnectionConfig.Timeout):
 		cancel()
 		c.wg.Wait()
-		return errConnectionTimeout
+		return ErrConnectionTimeout
 	case <-c.notifyConnected:
 		c.notifyConnected = nil
 		return nil

@@ -27,12 +27,6 @@ var (
 	ErrEmptyQueueName = errors.New("queue name should contain at least 1 character")
 )
 
-var (
-	// errConnectionTimeout is returned when the client did not succeed to connect to the server after the
-	// configured connection timeout duration.
-	errConnectionTimeout = errors.New("connection timeout")
-)
-
 // Client is a reliable wrapper around an AMQP connection which automatically recover
 // from connection errors.
 type Client struct {
@@ -119,7 +113,6 @@ func (c *Client) Connect(ctx context.Context) error {
 }
 
 func (c *Client) handleConnection(ctx context.Context) error {
-	timeout := time.After(c.config.ConnectionConfig.Timeout)
 	for {
 		c.logger.Info("Attempting to connect to the server...")
 
@@ -127,8 +120,6 @@ func (c *Client) handleConnection(ctx context.Context) error {
 		if err != nil {
 			c.logger.Error("Connection attempt failed", err)
 			select {
-			case <-timeout:
-				return errConnectionTimeout
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-time.After(c.config.ConnectionConfig.RetryDelay):
@@ -143,8 +134,6 @@ func (c *Client) handleConnection(ctx context.Context) error {
 		}
 
 		c.isReady.Store(false)
-
-		timeout = time.After(c.config.ConnectionConfig.Timeout)
 	}
 }
 

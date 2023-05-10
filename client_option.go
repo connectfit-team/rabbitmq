@@ -64,13 +64,6 @@ func WithVirtualHost(vhost string) ClientOption {
 	}
 }
 
-// WithConnectionTimeout configures the time the client will wait until a succesful connection.
-func WithConnectionTimeout(timeout time.Duration) ClientOption {
-	return func(cc *ClientConfig) {
-		cc.ConnectionConfig.Timeout = timeout
-	}
-}
-
 // WithConnectionRetryDelay configures the delay used by the client between each connection retry.
 func WithConnectionRetryDelay(delay time.Duration) ClientOption {
 	return func(cc *ClientConfig) {

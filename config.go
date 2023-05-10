@@ -24,12 +24,9 @@ type ConnectionConfig struct {
 	Port        string
 	VirtualHost string
 	RetryDelay  time.Duration
-	Timeout     time.Duration
 }
 
 const (
-	// DefaultConnectionTimeout is the default duration the client will wait until a successful connection.
-	DefaultConnectionTimeout = time.Minute * 1
 	// DefaultConnectionRetryDelay is the default delay between each connection attempt.
 	DefaultConnectionRetryDelay = time.Second * 5
 )
@@ -43,7 +40,6 @@ var DefaultConnectionConfig = ConnectionConfig{
 	Port:        "5672",
 	VirtualHost: "",
 	RetryDelay:  DefaultConnectionRetryDelay,
-	Timeout:     DefaultConnectionTimeout,
 }
 
 // ChannelConfig contains all the configurable parameters used by a client instance

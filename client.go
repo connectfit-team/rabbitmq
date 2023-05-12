@@ -19,9 +19,6 @@ var (
 	ErrNotConnected = errors.New("not connected to the server")
 	// ErrAlreadyConnected is returned when trying to connect while the client is already connected to the server.
 	ErrAlreadyConnected = errors.New("already connected to the server")
-	// ErrConnectionTimeout is returned when the client did not succeed to connect to the server after the
-	// configured connection timeout duration.
-	ErrConnectionTimeout = errors.New("connection timeout")
 	// ErrPublishTimeout is returned when the client did not succeed to publish a message after the configured
 	// publish timeout duration.
 	ErrPublishTimeout = errors.New("publish timeout")
@@ -78,15 +75,15 @@ func NewClient(opts ...ClientOption) *Client {
 
 // Connect starts a job which will asynchronously try to connect to the broker
 // and recover from future connection errors. A call to this method will block
-// until the first successful connection.
-
-// Timeout should be configured on the client through the
-// WithConnectionTimeout() option.
+// until the first successful connection. The context passed as argument can be
+// used to cancel the original connection attempt.
 //
 // A typical usage of this method would be the following:
 //
-//	c := rabbitmq.NewClient(rabbitmq.WithConnectionTimeout(5*time.Second))
-//	err := c.Connect()
+//	c := rabbitmq.NewClient()
+//	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+//	defer cancel()
+//	err := c.Connect(ctx)
 //	if err != nil {
 //		// handle error
 //	}
@@ -94,12 +91,12 @@ func NewClient(opts ...ClientOption) *Client {
 //
 // The caller must as well call the Close() method when he is done with the
 // client in order to avoid memory leaks.
-func (c *Client) Connect() error {
+func (c *Client) Connect(ctx context.Context) error {
 	if c.IsConnected() {
 		return ErrAlreadyConnected
 	}
 
-	c.notifyConnected = make(chan struct{}, 1)
+	c.notifyConnected = make(chan struct{})
 
 	connectionHandlerCtx, cancel := context.WithCancel(context.Background())
 	c.cancel = cancel
@@ -114,12 +111,11 @@ func (c *Client) Connect() error {
 	}()
 
 	select {
-	case <-time.After(c.config.ConnectionConfig.Timeout):
-		cancel()
+	case <-ctx.Done():
+		c.cancel()
 		c.wg.Wait()
-		return ErrConnectionTimeout
+		return ctx.Err()
 	case <-c.notifyConnected:
-		c.notifyConnected = nil
 		return nil
 	}
 }
@@ -165,8 +161,10 @@ func (c *Client) handleChannel(ctx context.Context) error {
 		}
 
 		c.isReady.Store(true)
+
 		if c.notifyConnected != nil {
 			c.notifyConnected <- struct{}{}
+			c.notifyConnected = nil
 		}
 
 		select {

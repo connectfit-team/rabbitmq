@@ -9,6 +9,7 @@ import (
 // ClientOption are options used to configure the client.
 type ClientOption func(*ClientConfig)
 
+// WithLogger configures the logger the client will use to log messages.
 func WithLogger(logger *slog.Logger) ClientOption {
 	return func(cc *ClientConfig) {
 		cc.Logger = logger

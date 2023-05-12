@@ -23,7 +23,7 @@ func WithConsumerAutoAck(autoAck bool) ConsumerOption {
 // WithConsumerExclusive determines whether only this consumer can access the queue or not.
 func WithConsumerExclusive(exclusive bool) ConsumerOption {
 	return func(cc *ConsumerConfig) {
-		cc.IsExclusive = exclusive
+		cc.Exclusive = exclusive
 	}
 }
 
@@ -32,7 +32,7 @@ func WithConsumerExclusive(exclusive bool) ConsumerOption {
 // the method it will raise a channel or connection exception.
 func WithConsumerNoWait(noWait bool) ConsumerOption {
 	return func(cc *ConsumerConfig) {
-		cc.IsNoWait = noWait
+		cc.NoWait = noWait
 	}
 }
 
@@ -40,7 +40,7 @@ func WithConsumerNoWait(noWait bool) ConsumerOption {
 // that published them or not.
 func WithConsumerNoLocal(noLocal bool) ConsumerOption {
 	return func(cc *ConsumerConfig) {
-		cc.IsNoLocal = noLocal
+		cc.NoLocal = noLocal
 	}
 }
 

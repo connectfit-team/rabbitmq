@@ -45,6 +45,8 @@ var DefaultConnectionConfig = ConnectionConfig{
 // ChannelConfig contains all the configurable parameters used by a client instance
 // to initialize a RabbitMQ channel.
 type ChannelConfig struct {
+	PublishConfirmNoWait     bool
+	NotifyPublishCapacity    int
 	PrefetchCount            int
 	PrefetchSize             int
 	IsGlobal                 bool
@@ -52,6 +54,8 @@ type ChannelConfig struct {
 }
 
 const (
+	// DefaultNotifyPublishCapacity is the default number of confirmation channel buffer size.
+	DefaultNotifyPublishCapacity = 1
 	// DefaultPrefetchCount is the default number of messages the server will be able to send to your consumer
 	// before receiving acknowledgment.
 	DefaultPrefetchCount = 1
@@ -62,6 +66,11 @@ const (
 // DefaultChannelConfig is the default configuration used by a client to initialize
 // a RabbitMQ channel.
 var DefaultChannelConfig = ChannelConfig{
+	// PublishConfirmNoWait decides whether the client should wait for a confirmation from the rabbitmq server
+	// If PublishConfirmNoWait is set to false, the client will wait for a confirmation from the server
+	// and need to handle the confirmation in the notifyPublish channel.
+	PublishConfirmNoWait:     false,
+	NotifyPublishCapacity:    DefaultNotifyPublishCapacity,
 	PrefetchCount:            DefaultPrefetchCount,
 	PrefetchSize:             0,
 	IsGlobal:                 false,

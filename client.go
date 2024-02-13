@@ -188,21 +188,9 @@ func (c *Client) initChannel(ctx context.Context) error {
 		return err
 	}
 
-	err = ch.Confirm(false)
-	if err != nil {
+	if err = c.setChannel(ch); err != nil {
 		return err
 	}
-
-	err = ch.Qos(
-		c.config.ChannelConfig.PrefetchCount,
-		c.config.ChannelConfig.PrefetchSize,
-		c.config.ChannelConfig.IsGlobal,
-	)
-	if err != nil {
-		return err
-	}
-
-	c.setChannel(ch)
 
 	c.logger.Info("Successfully initialized channel!")
 
@@ -455,12 +443,30 @@ func (c *Client) setConnection(connection *amqp.Connection) {
 	c.connection.NotifyClose(c.notifyConnClose)
 }
 
-func (c *Client) setChannel(channel *amqp.Channel) {
+func (c *Client) setChannel(channel *amqp.Channel) error {
 	c.channel = channel
+
+	if err := c.channel.Qos(
+		c.config.ChannelConfig.PrefetchCount,
+		c.config.ChannelConfig.PrefetchSize,
+		c.config.ChannelConfig.IsGlobal,
+	); err != nil {
+		return err
+	}
+
+	if !c.config.ChannelConfig.PublishConfirmNoWait {
+		if err := c.channel.Confirm(false); err != nil {
+			return err
+		}
+		if c.config.ChannelConfig.NotifyPublishCapacity < 1 {
+			c.config.ChannelConfig.NotifyPublishCapacity = 1
+		}
+		c.notifyPublish = make(chan amqp.Confirmation, c.config.ChannelConfig.NotifyPublishCapacity)
+		c.channel.NotifyPublish(c.notifyPublish)
+	}
 
 	c.notifyChanClose = make(chan *amqp.Error, 1)
 	c.channel.NotifyClose(c.notifyChanClose)
 
-	c.notifyPublish = make(chan amqp.Confirmation, 1)
-	c.channel.NotifyPublish(c.notifyPublish)
+	return nil
 }

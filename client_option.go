@@ -86,3 +86,19 @@ func WithPrefetchCount(count int) ClientOption {
 		cc.ChannelConfig.PrefetchCount = count
 	}
 }
+
+// WithPublishConfirmNoWait configures the client not wait for the server to confirm the message.
+func WithPublishConfirmNoWait() ClientOption {
+	return func(cc *ClientConfig) {
+		cc.ChannelConfig.PublishConfirmNoWait = true
+	}
+}
+
+// WithNotifyPublishCapacity configures the number of confirmation channel buffer size.
+// This option must wait for the server to confirm the message.
+func WithNotifyPublishCapacity(capacity int) ClientOption {
+	return func(cc *ClientConfig) {
+		cc.ChannelConfig.PublishConfirmNoWait = false
+		cc.ChannelConfig.NotifyPublishCapacity = capacity
+	}
+}

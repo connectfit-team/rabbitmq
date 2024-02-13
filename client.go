@@ -30,16 +30,17 @@ var (
 // Client is a reliable wrapper around an AMQP connection which automatically recover
 // from connection errors.
 type Client struct {
-	config          ClientConfig
-	logger          *slog.Logger
-	connection      *amqp.Connection
-	channel         *amqp.Channel
-	isReady         atomic.Bool
-	notifyConnClose chan *amqp.Error
-	notifyChanClose chan *amqp.Error
-	notifyPublish   chan amqp.Confirmation
-	cancel          func()
-	wg              sync.WaitGroup
+	config             ClientConfig
+	logger             *slog.Logger
+	connection         *amqp.Connection
+	channel            *amqp.Channel
+	isReady            atomic.Bool
+	notifyConnClose    chan *amqp.Error
+	notifyChanClose    chan *amqp.Error
+	notifyPublish      chan amqp.Confirmation
+	publishConformWait bool
+	cancel             func()
+	wg                 sync.WaitGroup
 }
 
 // NewClient creates a new client instance.
@@ -338,11 +339,12 @@ func (c *Client) Publish(ctx context.Context, msg amqp.Publishing, routingKey st
 				continue
 			}
 		}
-		confirmation := <-c.notifyPublish
-		if confirmation.Ack {
-			return nil
+		if c.publishConformWait {
+			confirmation := <-c.notifyPublish
+			if confirmation.Ack {
+				return nil
+			}
 		}
-
 		timeout = time.After(publishCfg.Timeout)
 	}
 }
@@ -455,9 +457,12 @@ func (c *Client) setChannel(channel *amqp.Channel) error {
 	}
 
 	if !c.config.ChannelConfig.PublishConfirmNoWait {
+		c.publishConformWait = true
+
 		if err := c.channel.Confirm(false); err != nil {
 			return err
 		}
+
 		if c.config.ChannelConfig.NotifyPublishCapacity < 1 {
 			c.config.ChannelConfig.NotifyPublishCapacity = 1
 		}

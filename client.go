@@ -475,3 +475,16 @@ func (c *Client) setChannel(channel *amqp.Channel) error {
 
 	return nil
 }
+
+func (c *Client) IsHealthy() bool {
+	if !c.isReady.Load() {
+		return false
+	}
+	if c.connection == nil || c.connection.IsClosed() {
+		return false
+	}
+	if c.channel == nil || c.channel.IsClosed() {
+		return false
+	}
+	return true
+}

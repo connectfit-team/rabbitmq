@@ -100,14 +100,16 @@ func (c *Client) Connect(ctx context.Context) error {
 		}
 	}()
 
+	ready := time.NewTicker(readyPollInterval)
+	defer ready.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			cancel()
 			c.wg.Wait()
 			return ctx.Err()
-		default:
-			// TODO: Might check for a cleaner way to do this.
+		case <-ready.C:
 			if c.isReady.Load() {
 				return nil
 			}

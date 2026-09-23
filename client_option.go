@@ -1,9 +1,8 @@
 package rabbitmq
 
 import (
+	"log/slog"
 	"time"
-
-	"golang.org/x/exp/slog"
 )
 
 // ClientOption are options used to configure the client.

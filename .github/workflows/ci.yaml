@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - run: go build ./...
+
+      # go test 는 slog 분석기를 함께 돌린다. Error(msg, err) 처럼 키를 빠뜨린
+      # 호출은 여기서 빌드 실패가 된다.
+      - run: go test -race ./...
+
+      - run: go vet ./...

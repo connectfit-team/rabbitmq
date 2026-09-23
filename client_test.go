@@ -39,6 +39,14 @@ func TestRedactedBrokerURL(t *testing.T) {
 			mustHide: "p@ss:word",
 		},
 		{
+			// 기본값이 guest/guest 다. 비밀번호가 사용자명과 같다고 해서
+			// 멀쩡히 가려진 URL 을 버리면 안 된다.
+			name:     "비밀번호가 사용자명과 같아도 URL 을 살린다",
+			opts:     []ClientOption{WithHost("127.0.0.1"), WithPort("1")},
+			want:     "amqp://guest:xxxxx@127.0.0.1:1/",
+			mustHide: "",
+		},
+		{
 			name: "userinfo 밖에 있으면 통째로 버린다",
 			opts: []ClientOption{
 				WithURL("amqp://broker:5672/?auth=hunter2"),

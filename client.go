@@ -184,10 +184,18 @@ func (c *Client) redactedBrokerURL() string {
 		return "(unparsable broker url)"
 	}
 
-	s := u.Redacted()
+	// userinfo 에 들어 있으면 Redacted 가 덮는다. 비밀번호에 @ 나 : 가 섞여
+	// 있어도 마지막 @ 로 갈라지므로 전부 덮인다.
+	if _, ok := u.User.Password(); ok {
+		return u.Redacted()
+	}
 
-	// WithURL 로 받은 URL 은 모양을 우리가 정하지 않는다. userinfo 밖(질의
-	// 문자열 같은 곳)에 비밀번호가 있으면 Redacted 가 못 가리므로 통째로 버린다.
+	// 여기부터는 userinfo 에 비밀번호가 없는 경우다. WithURL 로 받은 URL 은
+	// 모양을 우리가 정하지 않으니 질의 문자열 같은 곳에 남아 있을 수 있다.
+	//
+	// 남았는지 볼 때 URL 전체를 훑으면 안 된다 — 비밀번호가 사용자명이나
+	// 호스트와 우연히 같으면(기본값 guest/guest 가 그렇다) 멀쩡한 URL 을 버린다.
+	s := u.Redacted()
 	if pw := c.config.ConnectionConfig.Password; pw != "" && strings.Contains(s, pw) {
 		return "(redacted broker url)"
 	}

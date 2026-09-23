@@ -1,10 +1,10 @@
 package rabbitmq
 
 import (
+	"log/slog"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
-	"golang.org/x/exp/slog"
 )
 
 // ClientConfig represents the configuration of a client instance.

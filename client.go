@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
-	"golang.org/x/exp/slog"
 )
 
 var (
@@ -94,7 +96,7 @@ func (c *Client) Connect(ctx context.Context) error {
 
 		err := c.handleConnection(connectionHandlerCtx)
 		if err != nil {
-			c.logger.Error("Connection lost", err)
+			c.logger.Error("Connection lost", "error", err)
 		}
 	}()
 
@@ -119,7 +121,7 @@ func (c *Client) handleConnection(ctx context.Context) error {
 
 		err := c.connect(ctx)
 		if err != nil {
-			c.logger.Error("Connection attempt failed", err)
+			c.logger.Error("Connection attempt failed", "error", err)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -144,12 +146,12 @@ func (c *Client) handleChannel(ctx context.Context) error {
 
 		err := c.initChannel(ctx)
 		if err != nil {
-			c.logger.Error("Failed to initialize the channel", err)
+			c.logger.Error("Failed to initialize the channel", "error", err)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case err = <-c.notifyConnClose:
-				c.logger.Error("Connection closed", err)
+				c.logger.Error("Connection closed", "error", err)
 				return nil
 			case <-time.After(c.config.ChannelConfig.InitializationRetryDelay):
 				continue
@@ -160,19 +162,50 @@ func (c *Client) handleChannel(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case err = <-c.notifyConnClose:
-			c.logger.Error("Connection closed", err)
+			c.logger.Error("Connection closed", "error", err)
 			return nil
 		case err := <-c.notifyChanClose:
-			c.logger.Error("Channel closed", err)
+			c.logger.Error("Channel closed", "error", err)
 		}
 
 		c.isReady.Store(false)
 	}
 }
 
+// redactedBrokerURL 은 로그에 쓸 접속 URL 을 만든다.
+//
+// URL 은 NewClient 가 Username·Password 로 조립한 것이라 원문을 그대로 찍으면
+// 비밀번호가 로그에 남는다.
+func (c *Client) redactedBrokerURL() string {
+	raw := c.config.ConnectionConfig.URL
+
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "(unparsable broker url)"
+	}
+
+	// userinfo 에 들어 있으면 Redacted 가 덮는다. 비밀번호에 @ 나 : 가 섞여
+	// 있어도 마지막 @ 로 갈라지므로 전부 덮인다.
+	if _, ok := u.User.Password(); ok {
+		return u.Redacted()
+	}
+
+	// 여기부터는 userinfo 에 비밀번호가 없는 경우다. WithURL 로 받은 URL 은
+	// 모양을 우리가 정하지 않으니 질의 문자열 같은 곳에 남아 있을 수 있다.
+	//
+	// 남았는지 볼 때 URL 전체를 훑으면 안 된다 — 비밀번호가 사용자명이나
+	// 호스트와 우연히 같으면(기본값 guest/guest 가 그렇다) 멀쩡한 URL 을 버린다.
+	s := u.Redacted()
+	if pw := c.config.ConnectionConfig.Password; pw != "" && strings.Contains(s, pw) {
+		return "(redacted broker url)"
+	}
+
+	return s
+}
+
 func (c *Client) connect(ctx context.Context) error {
 	c.logger.Info("Attempting to connect to the broker",
-		"broker_url", c.config.ConnectionConfig.URL,
+		"broker_url", c.redactedBrokerURL(),
 	)
 
 	conn, err := amqp.Dial(c.config.ConnectionConfig.URL)
@@ -244,7 +277,7 @@ func (c *Client) Consume(ctx context.Context, consumerName, queueName string, op
 				consumerCfg.Arguments,
 			)
 			if err != nil {
-				c.logger.Error("Failed to start the consumer", err,
+				c.logger.Error("Failed to start the consumer", "error", err,
 					"queue_name", queueName,
 				)
 				select {
@@ -269,7 +302,7 @@ func (c *Client) Consume(ctx context.Context, consumerName, queueName string, op
 
 						err := c.channel.Cancel(consumerName, consumerCfg.IsNoWait)
 						if err != nil {
-							c.logger.Error("Failed to cancel the delivery", err,
+							c.logger.Error("Failed to cancel the delivery", "error", err,
 								"consumer_name", consumerName,
 							)
 							return
@@ -327,7 +360,7 @@ func (c *Client) Publish(ctx context.Context, msg amqp.Publishing, routingKey st
 			msg,
 		)
 		if err != nil {
-			c.logger.Error("Failed to publish the message", err,
+			c.logger.Error("Failed to publish the message", "error", err,
 				"routing_key", routingKey,
 			)
 			select {

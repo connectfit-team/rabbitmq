@@ -26,6 +26,12 @@ type ConnectionConfig struct {
 	RetryDelay  time.Duration
 }
 
+// readyPollInterval 은 첫 연결이 섰는지 확인하는 주기다.
+//
+// 이 자리에서 select 의 default 로 돌면 연결될 때까지 코어 하나를 태운다 —
+// 브로커가 안 올라오면 그동안 내내. 줄이면 인지가 빨라지는 대신 CPU 를 더 쓴다.
+const readyPollInterval = 10 * time.Millisecond
+
 const (
 	// DefaultConnectionRetryDelay is the default delay between each connection attempt.
 	DefaultConnectionRetryDelay = time.Second * 5

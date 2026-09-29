@@ -212,10 +212,27 @@ func (c *Client) connect(ctx context.Context) error {
 
 	conn, err := amqp.Dial(c.config.ConnectionConfig.URL)
 	if err != nil {
-		return err
+		return redactDialError(err)
 	}
 	c.setConnection(conn)
 	return nil
+}
+
+// errUnparsableBrokerURL 은 URL 파싱 오류 대신 로그에 남는다.
+var errUnparsableBrokerURL = errors.New("broker url could not be parsed (detail withheld as it may contain the password; check the username and password for characters that need percent-encoding)")
+
+// redactDialError 는 connect 의 오류를 로그에 써도 되게 만든다. handleConnection 이
+// 그 오류를 재시도마다 찍는다.
+//
+// amqp.Dial 이 감싸지 않고 돌려주는 url.Parse 오류는 원문 URL 을 담고, 사유
+// (invalid port ":…" after host 등)에도 비밀번호 조각이 섞인다. 그래서 URL 만
+// 갈지 않고 사유째 버린다.
+func redactDialError(err error) error {
+	var parseErr *url.Error
+	if errors.As(err, &parseErr) {
+		return errUnparsableBrokerURL
+	}
+	return err
 }
 
 func (c *Client) initChannel(ctx context.Context) error {

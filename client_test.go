@@ -154,3 +154,86 @@ func TestErrorLogsUseErrorKey(t *testing.T) {
 		t.Fatalf("!BADKEY 가 찍혔다:\n%s", buf.String())
 	}
 }
+
+// connectOnceLogs 는 닿지 않는 브로커에 한 번 접속을 시도하고 그동안의 로그를 돌려준다.
+func connectOnceLogs(t *testing.T, opts ...ClientOption) string {
+	t.Helper()
+
+	var buf bytes.Buffer
+	c := NewClient(append([]ClientOption{
+		WithLogger(slog.New(slog.NewJSONHandler(&buf, nil))),
+		WithUsername("svc"),
+		WithHost("127.0.0.1"),
+		WithPort("1"),
+	}, opts...)...)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // 첫 시도 뒤 재시도 없이 빠져나온다.
+
+	_ = c.Connect(ctx)
+
+	return buf.String()
+}
+
+// attemptFailedError 는 "Connection attempt failed" 줄의 error 값을 돌려준다.
+// 그 줄이 없으면 아무것도 보지 않고 통과하게 되므로 실패시킨다.
+func attemptFailedError(t *testing.T, out string) string {
+	t.Helper()
+
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatalf("JSON 이 아니다: %s", line)
+		}
+
+		if m["msg"] == "Connection attempt failed" {
+			got, _ := m["error"].(string)
+			return got
+		}
+	}
+
+	t.Fatalf("접속 실패 줄이 없다:\n%s", out)
+	return ""
+}
+
+// URL 이 파싱되지 않으면 broker_url 은 가려져도, 이어지는 접속 실패 오류가 원문 URL 을
+// 담는다. 그 줄은 재시도마다 다시 찍힌다.
+func TestConnectionErrorDoesNotLeakPassword(t *testing.T) {
+	cases := []struct {
+		name     string
+		password string
+	}{
+		{name: "슬래시(base64 비밀번호에 흔하다)", password: "FAKEpw/abc"},
+		{name: "깨진 퍼센트 이스케이프", password: "FAKEpw%zz"},
+		{name: "userinfo 에 못 쓰는 문자", password: "FAKEpw^abc"},
+		// # 뒤가 잘려 앞부분만 남는다. 조각도 샌 것이다.
+		{name: "해시", password: "FAKEpw#abc"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			out := connectOnceLogs(t, WithPassword(c.password))
+
+			if strings.Contains(out, "FAKEpw") {
+				t.Fatalf("로그에 비밀번호가 남았다:\n%s", out)
+			}
+
+			if got := attemptFailedError(t, out); got != errUnparsableBrokerURL.Error() {
+				t.Fatalf("error = %s", got)
+			}
+		})
+	}
+}
+
+// 가리는 것은 URL 파싱 오류뿐이다. 접속 거절 같은 오류는 원인을 봐야 하므로 그대로 둔다.
+func TestConnectionErrorKeepsDialFailure(t *testing.T) {
+	out := connectOnceLogs(t, WithPassword("s3cr3tP4ss"))
+
+	if strings.Contains(out, "s3cr3tP4ss") {
+		t.Fatalf("로그에 비밀번호가 남았다:\n%s", out)
+	}
+
+	if got := attemptFailedError(t, out); !strings.Contains(got, "127.0.0.1:1") {
+		t.Fatalf("접속 오류의 원인이 사라졌다: %s", got)
+	}
+}
